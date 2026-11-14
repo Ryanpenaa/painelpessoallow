@@ -53,7 +53,6 @@ function Home() {
   const [adsetFocus,setAdsetFocus]=useState("");
   const [showSelectedOnly,setShowSelectedOnly]=useState(false);
   const [selectedEntities,setSelectedEntities]=useState<Record<string,string[]>>({});
-  const entityInFlight=useRef(false);
   const entityRequest=useRef(0);
   const currentLevel:MetaLevel=tab==="Conjuntos"?"adset":tab==="Anúncios"?"ad":"campaign";
   const selectionKey=(level:MetaLevel)=>selectedAccount+":"+level;
@@ -199,8 +198,7 @@ function Home() {
 
   const loadEntities=async()=>{
     if(!metaSession||!selectedAccount||tab==="Contas"){setEntityRows([]);return;}
-    if(entityInFlight.current || Date.now()<throttleUntil.current)return;
-    entityInFlight.current=true;
+    if(Date.now()<throttleUntil.current)return;
     const request=++entityRequest.current;
     setEntityBusy(true);setEntityError("");
     const dates=rangeDates();
@@ -209,15 +207,16 @@ function Home() {
       if(request===entityRequest.current){setEntityRows(response.items||[]);setEntityPartial(!!response.partial);}
     }catch(error){
       if(request===entityRequest.current){setEntityRows([]);setEntityError(error instanceof Error?error.message:"Erro ao carregar itens da Meta.");}
-    }finally{entityInFlight.current=false;setEntityBusy(false);}
+    }finally{if(request===entityRequest.current)setEntityBusy(false);}
   };
   useEffect(()=>{
+    setCampaignFocus("");
+    setAdsetFocus("");
+  },[selectedAccount]);
+  useEffect(()=>{
     entityRequest.current+=1;
-    setEntityRows([]);setCampaignFocus("");setAdsetFocus("");
-    if(selectedAccount && metaSession && tab!=="Contas"){
-      // Fetch after clearing the previous selection's rows.
-      void loadEntities();
-    }
+    setEntityRows([]);
+    if(selectedAccount && metaSession && tab!=="Contas")void loadEntities();
   },[selectedAccount,metaSession,tab,period,since,until]);
   useEffect(()=>{
     if(page!=="Campanhas"||!autoRefresh||!metaSession||!selectedAccount||tab==="Contas")return;
