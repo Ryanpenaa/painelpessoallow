@@ -31,6 +31,32 @@ function Home() {
   const [connectBusy, setConnectBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [oauthMessage, setOauthMessage] = useState("");
+  const [metaConnections, setMetaConnections] = useState<Array<{meta_user_id:string;name:string|null;expires_at:string|null}>>([]);
+  const [adAccounts, setAdAccounts] = useState<Array<{id:string;name:string;account_status:number;currency:string}>>([]);
+  const [accountWarning, setAccountWarning] = useState<string[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const loadMetaAccounts = async (token:string) => {
+    setLoadingAccounts(true);
+    try {
+      const request = async (action:string) => {
+        const response=await fetch(metaOauthEndpoint, {
+          method:"POST",
+          headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json","apikey":"sb_publishable_GAvjkE8dPmXTvDZmqNAYnw_akiILXaH"},
+          body:JSON.stringify({action})
+        });
+        const payload=await response.json();
+        if(!response.ok) throw new Error(payload.error || "Erro ao consultar conexões Meta");
+        return payload;
+      };
+      const state=await request("status");
+      setMetaConnections(state.connections||[]);
+      const data=await request("accounts");
+      setAdAccounts(data.accounts||[]);
+      setAccountWarning(data.warnings||[]);
+    } catch(error) {
+      setOauthMessage(error instanceof Error?error.message:"Não foi possível consultar as contas Meta.");
+    } finally { setLoadingAccounts(false); }
+  };
   useEffect(() => {
     let mounted = true;
     void supabase.auth.getSession().then(({data}) => { if(mounted) setSession(data.session); });
@@ -38,6 +64,18 @@ function Home() {
       if(mounted) setSession(nextSession);
     });
     return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
+  useEffect(() => {
+    if(session?.access_token) void loadMetaAccounts(session.access_token);
+    else {setMetaConnections([]);setAdAccounts([]);}
+  }, [session?.access_token]);
+  useEffect(() => {
+    if(typeof window!=="undefined" && new URLSearchParams(window.location.search).get("meta")==="connected") {
+      setPage("Integrações");
+      setIntegration("Facebook Ads");
+      setOauthMessage("Autorização recebida! Conferindo contas de anúncios...");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
   const signInOrUp = async (mode: "login" | "signup") => {
     setAuthMessage("");
@@ -119,7 +157,13 @@ function Home() {
 </div> : <div className="mb-5 flex flex-wrap items-center gap-2 text-sm"><span className="rounded-md bg-green-50 px-3 py-2 text-green-800">Acesso TrackUp: {session.user.email}</span><button className={btn} onClick={()=>void supabase.auth.signOut()}>Sair</button></div>}
 <button disabled={!session || connectBusy} onClick={()=>void startMetaConnection()} className="rounded-md bg-blue-600 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{connectBusy?"Conectando...":"Conectar com Facebook"}</button>
 {oauthMessage && <p role="alert" className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{oauthMessage}</p>}
-<p className="mt-6 border-t pt-4 text-sm text-slate-500">As contas de anúncios serão exibidas após validação da autorização e integração da consulta à Marketing API. Nenhum resultado fictício é apresentado.</p></>:<><h2 className="mb-3 font-semibold">{integration}</h2><p className="text-sm text-slate-500">Reservado para uma próxima etapa, depois do login com Facebook e da consulta de campanhas.</p></>}</div></div>}
+<div className="mt-6 border-t pt-4">
+  <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Contas de anúncios conectadas</h3><button className={btn} disabled={!session||loadingAccounts} onClick={()=>session?.access_token&&void loadMetaAccounts(session.access_token)}>{loadingAccounts?"Consultando...":"Atualizar contas"}</button></div>
+  {metaConnections.length>0 && <p className="mb-3 text-sm text-green-700">{metaConnections.length} perfil(is) Facebook autorizado(s): {metaConnections.map(c=>c.name||c.meta_user_id).join(", ")}</p>}
+  {adAccounts.length===0?<p className="text-sm text-slate-500">{loadingAccounts?"Buscando suas contas na Meta...":"Nenhuma conta de anúncios retornada. Conecte o Facebook ou verifique as permissões de acesso."}</p>:<div className="space-y-2">{adAccounts.map(a=><div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3"><div><strong className="block text-sm">{a.name}</strong><span className="text-xs text-slate-500">{a.id} · {a.currency}</span></div><span className={"rounded-full px-3 py-1 text-xs "+(a.account_status===1?"bg-green-50 text-green-700":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span></div>)}</div>}
+  {accountWarning.map((warning,i)=><p key={i} className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
+  <p className="mt-3 text-xs text-slate-500">A listagem é consultada diretamente na Marketing API. Relatórios de gastos e campanhas ainda serão sincronizados em uma etapa separada.</p>
+</div></>:<><h2 className="mb-3 font-semibold">{integration}</h2><p className="text-sm text-slate-500">Reservado para uma próxima etapa, depois do login com Facebook e da consulta de campanhas.</p></>}</div></div>}
         {updated&&<p className="mt-5 text-xs text-slate-400">Interface atualizada às {updated}. Dados externos dependem da integração.</p>}
       </main>
     </div>
