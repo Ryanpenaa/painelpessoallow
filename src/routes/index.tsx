@@ -6,6 +6,7 @@ import { BarChart3, Megaphone, Plug, Pencil, RefreshCw, Eye, EyeOff, Download, X
 
 export const Route = createFileRoute("/")({ component: Home });
 const metaOauthEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/meta-oauth-callback";
+const checkoutEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/trackup-checkouts";
 const allCards = ["Faturamento", "Lucro operacional", "Gasto em Ads", "CPA", "ARPU", "ROAS", "ROI", "CPC", "CTR", "CPM", "Vendas aprovadas", "Vendas pendentes", "Chargeback", "Margem", "Cliques", "Impressões", "Checkouts iniciados"];
 const allCols = ["Status", "Campanha", "Última atualização", "Orçamento", "Gasto", "Vendas Meta", "Vendas TrackUp", "Vendas pendentes", "Faturamento", "Lucro", "ROAS", "CPA", "ARPU", "Impressões", "Cliques", "CPC", "CTR"];
 const periods = ["Hoje", "Ontem", "7 dias", "15 dias", "30 dias", "Personalizado"];
@@ -64,6 +65,9 @@ function Home() {
   const throttleUntil = useRef(0);
   const syncAccount = useRef("");
 
+  const [checkoutProducts,setCheckoutProducts]=useState<Array<{id:string;name:string;currency:string}>>([]);
+  const [chosenProduct,setChosenProduct]=useState("");
+  const [checkoutStats,setCheckoutStats]=useState<{product_pie:Array<{name:string;value:number}>;payment_pie:Array<{name:string;value:number}>;approved_count:number;revenue_by_currency:Record<string,number>}|null>(null);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [campaigns, setCampaigns] = useState<Array<{id:string;name:string;status:string;effective_status:string;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}>>([]);
   const [campaignBusy, setCampaignBusy] = useState(false);
@@ -183,6 +187,31 @@ function Home() {
     if(metaSession)void loadMetaAccounts(metaSession);
     else {setMetaConnections([]);setAdAccounts([]);setCampaigns([]);setSelectedAccount("");setOwnerProfile(null);setMetaTokenExpiresAt(null);}
   },[metaSession]);
+  const checkoutApi=async(action:string,other:Record<string,string>={})=>{
+    if(!metaSession)throw Error("Conecte o Facebook para visualizar vendas.");
+    const response=await fetch(checkoutEndpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+metaSession},body:JSON.stringify({action,...other})});
+    const result=await response.json();
+    if(!response.ok)throw Error(result.error||"Erro ao consultar vendas");
+    return result;
+  };
+  useEffect(()=>{
+    if(!metaSession){setCheckoutProducts([]);setCheckoutStats(null);return;}
+    let active=true;
+    void checkoutApi("list").then(data=>{if(active)setCheckoutProducts(data.products||[]);}).catch(()=>{});
+    return ()=>{active=false;};
+  },[metaSession,page]);
+  useEffect(()=>{
+    if(!metaSession)return;
+    let active=true;
+    const load=async()=>{
+      const dates=rangeDates();
+      try{const result=await checkoutApi("stats",{since:dates.since,until:dates.until,...(chosenProduct?{product_id:chosenProduct}:{})});if(active)setCheckoutStats(result);}
+      catch{if(active)setCheckoutStats(null);}
+    };
+    void load();
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void load();},60000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[metaSession,chosenProduct,period,since,until]);
   const loadCampaigns=async()=>{
     if(!metaSession || !selectedAccount || !visibleAccounts.some(a=>a.id===selectedAccount)){setCampaigns([]);return;}
     if(campaignsLock.current || Date.now()<throttleUntil.current)return;
@@ -356,7 +385,7 @@ function Home() {
       <main className="min-w-0 flex-1 p-4 md:p-7">
         <header className="mb-5 flex flex-wrap items-center gap-3"><button className={btn+" md:hidden"} onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={18}/></button><h1 className="mr-auto text-xl font-bold md:text-2xl">{page==="Painel"?"Dashboard Principal":page}</h1>{page==="Painel"&&<div className="flex flex-wrap gap-1">{periods.map(p=><button className={btn+(period===p?" border-blue-500 bg-blue-50 text-blue-700":"")} key={p} onClick={()=>setPeriod(p)}>{p}</button>)}</div>}</header>
         {page==="Painel"&&<div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={visibleAccounts.some(a=>a.id===selectedAccount)?selectedAccount:""} onChange={e=>setSelectedAccount(e.target.value)} disabled={!visibleAccounts.length}><option value="">{visibleAccounts.length?"Selecione uma conta":"Nenhuma conta ativada"}</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>document.getElementById("trackup-metrics-customizer")?.scrollIntoView({behavior:"smooth",block:"start"})}><Pencil className="inline" size={15}/> Personalizar métricas</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
+          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input} value={chosenProduct} onChange={e=>setChosenProduct(e.target.value)}><option value="">Todos os produtos</option>{checkoutProducts.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><select aria-label="Conta" className={input} value={visibleAccounts.some(a=>a.id===selectedAccount)?selectedAccount:""} onChange={e=>setSelectedAccount(e.target.value)} disabled={!visibleAccounts.length}><option value="">{visibleAccounts.length?"Selecione uma conta":"Nenhuma conta ativada"}</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>document.getElementById("trackup-metrics-customizer")?.scrollIntoView({behavior:"smooth",block:"start"})}><Pencil className="inline" size={15}/> Personalizar métricas</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
   <span className="font-semibold text-slate-800">{metaSession?"Meta Ads conectada":"Meta Ads desconectada"}</span>
   {ownerProfile&&<span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-800">Perfil pessoal: {ownerProfile.email}</span>}
@@ -374,6 +403,8 @@ function Home() {
   currency={currency}
   hide={hide}
   onManageAccounts={()=>{setPage("Integrações");setIntegration("Facebook Ads");}}
+  productSlices={checkoutStats?.product_pie||[]}
+  paymentSlices={checkoutStats?.payment_pie||[]}
 />
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
