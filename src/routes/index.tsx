@@ -29,7 +29,7 @@ function Home() {
   const [adAccounts, setAdAccounts] = useState<Array<{id:string;name:string;account_status:number;currency:string}>>([]);
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
-  const [summary, setSummary] = useState<{spend:number;clicks:number;impressions:number;cpc:number;ctr:number;cpm:number;reach:number;frequency:number}|null>(null);
+  const [summary, setSummary] = useState<{spend:number;clicks:number;impressions:number;cpc:number;ctr:number;cpm:number;reach:number;frequency:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}|null>(null);
   const [lastMetaUpdate, setLastMetaUpdate] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [syncIssue, setSyncIssue] = useState("");
@@ -40,7 +40,7 @@ function Home() {
   const syncAccount = useRef("");
 
   const [selectedAccount, setSelectedAccount] = useState("");
-  const [campaigns, setCampaigns] = useState<Array<{id:string;name:string;status:string;effective_status:string;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number}>>([]);
+  const [campaigns, setCampaigns] = useState<Array<{id:string;name:string;status:string;effective_status:string;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}>>([]);
   const [campaignBusy, setCampaignBusy] = useState(false);
   const [campaignError, setCampaignError] = useState("");
   const [since, setSince] = useState("");
@@ -177,6 +177,38 @@ function Home() {
   const sum=(key:"spend"|"clicks"|"impressions")=>summary?.[key]??0;
   const money=(value:number,currency="BRL")=>new Intl.NumberFormat("pt-BR",{style:"currency",currency}).format(value);
   const currency=adAccounts.find(a=>a.id===selectedAccount)?.currency||"BRL";
+  const metricValue=(name:string)=>{
+    if(!summary)return "—";
+    const count=(n:number|null)=>n===null?"—":n.toLocaleString("pt-BR");
+    const currencyValue=(n:number|null)=>n===null?"—":money(n,currency);
+    const percentage=(n:number|null)=>n===null?"—":n.toFixed(2)+"%";
+    const decimal=(n:number|null)=>n===null?"—":n.toFixed(2)+"x";
+    switch(name){
+      case "Faturamento":return currencyValue(summary.purchase_value);
+      case "Gasto em Ads":return currencyValue(summary.spend);
+      case "CPA":return currencyValue(summary.meta_cpa);
+      case "ARPU":return currencyValue(summary.meta_arpu);
+      case "ROAS":return decimal(summary.meta_roas);
+      case "CPC":return currencyValue(summary.cpc);
+      case "CTR":return percentage(summary.ctr);
+      case "CPM":return currencyValue(summary.cpm);
+      case "Vendas aprovadas":return count(summary.purchases);
+      case "Cliques":return count(summary.clicks);
+      case "Impressões":return count(summary.impressions);
+      case "Checkouts iniciados":return count(summary.checkouts);
+      default:return "—";
+    }
+  };
+  const metricTitle=(name:string)=>name==="Faturamento"?"Valor de compras (Meta)":name==="Vendas aprovadas"?"Compras atribuídas (Meta)":name==="CPA"?"CPA (Meta)":name==="ARPU"?"Ticket médio (Meta)":name==="ROAS"?"ROAS (Meta)":name;
+  const metricOrigin=(name:string)=>{
+    if(!summary)return selectedAccount?"Aguardando dados da Meta":"Selecione uma conta";
+    if(["Faturamento","CPA","ARPU","ROAS","Vendas aprovadas","Checkouts iniciados"].includes(name))
+      return "Conversões atribuídas pela Meta · não são vendas confirmadas";
+    if(["Gasto em Ads","CPC","CTR","CPM","Cliques","Impressões"].includes(name))
+      return "Meta Ads Insights · conta e período selecionados";
+    return "Indisponível na Meta · requer integração do checkout";
+  };
+
   const startMetaConnection=async()=>{
     setOauthMessage("");
     setConnectBusy(true);
@@ -233,7 +265,11 @@ function Home() {
   <span className="text-slate-500">Os dados podem ter atraso de processamento na Meta.</span>
 </div>
 <div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {adAccounts.length} conta(s) disponível(is). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5"><div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{c}</div><div className="text-2xl font-bold">{hide?"••••":!selectedAccount?"—":c==="Gasto em Ads"?(summary?money(sum("spend"),currency):"—"):c==="Cliques"?(summary?sum("clicks").toLocaleString("pt-BR"):"—"):c==="Impressões"?(summary?sum("impressions").toLocaleString("pt-BR"):"—"):c==="CPC"?(sum("clicks")>0?money(sum("spend")/sum("clicks"),currency):"—"):c==="CTR"?(sum("impressions")>0?(sum("clicks")/sum("impressions")*100).toFixed(2)+"%":"—"):"—"}</div><div className="mt-2 text-xs text-slate-400">{selectedAccount&&["Gasto em Ads","Cliques","Impressões","CPC","CTR"].includes(c)?"Dados da Meta (campanhas)":"Aguardando integração de vendas"}</div></div>)}</div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5">
+  <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{metricTitle(c)}</div>
+  <div className="text-2xl font-bold">{hide?"••••":metricValue(c)}</div>
+  <div className="mt-2 text-xs text-slate-400">{metricOrigin(c)}</div>
+</div>)}</div>
           <div className="grid min-w-0 gap-4 lg:grid-cols-5">
   <section className="min-w-0 rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-6 lg:col-span-3">
     <h2 className="border-b pb-4 text-sm font-semibold">Funil de Conversão (Meta Ads)</h2>
@@ -243,8 +279,12 @@ function Home() {
         <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Impressões</div><div className="mt-1 text-xl font-bold">{summary.impressions.toLocaleString("pt-BR")}</div></div>
         <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Cliques</div><div className="mt-1 text-xl font-bold">{summary.clicks.toLocaleString("pt-BR")}</div></div>
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Checkouts iniciados (Meta)</div><div className="mt-1 text-xl font-bold">{summary.checkouts===null?"—":summary.checkouts.toLocaleString("pt-BR")}</div></div>
+        <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Compras atribuídas (Meta)</div><div className="mt-1 text-xl font-bold">{summary.purchases===null?"—":summary.purchases.toLocaleString("pt-BR")}</div></div>
+      </div>
       <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{width:Math.min(100,summary.impressions?summary.clicks/summary.impressions*100:0)+"%"}}/></div>
-      <p className="text-xs text-slate-500">CTR: {summary.ctr.toFixed(2)}% · Gasto: {money(summary.spend,currency)}. Compras e checkouts aparecerão após a integração dos eventos de conversão.</p>
+      <p className="text-xs text-slate-500">CTR: {summary.ctr.toFixed(2)}% · Gasto: {money(summary.spend,currency)}. Compras e checkouts são atribuídos pela Meta quando os eventos estão disponíveis; vendas confirmadas dependem do checkout.</p>
     </div>}
   </section>
   <section className="min-w-0 rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-6 lg:col-span-2">
@@ -262,7 +302,21 @@ function Home() {
         {page==="Campanhas"&&<div className="space-y-4">
           <div className="flex overflow-auto border-b border-[#dce3f1]">{["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>setTab(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===tab?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div>
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4"><label className="flex flex-col gap-1 text-xs text-slate-500">Status<select value={status} onChange={e=>setStatus(e.target.value)} className={input}><option>Qualquer</option><option>Ativo</option><option>Pausado</option></select></label><label className="flex flex-col gap-1 text-xs text-slate-500">Período<select value={period} onChange={e=>setPeriod(e.target.value)} className={input}>{periods.map(p=><option key={p}>{p}</option>)}</select></label>{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input}/><input aria-label="Data final" type="date" className={input}/></>}<label className="flex flex-col gap-1 text-xs text-slate-500">Conta<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label className="flex flex-1 items-center gap-2 rounded-md border border-[#d9e1ef] bg-white px-3"><Search size={15}/><input className="min-w-28 flex-1 py-2 text-sm outline-none" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar por nome"/></label><button className={btn} onClick={()=>setEdit("cols")}>Colunas</button><button className={btn} onClick={()=>void loadCampaigns()} disabled={campaignBusy}>{campaignBusy?"Atualizando...":"Atualizar"}</button><button className={btn} disabled title="Aguardando dados reais">Exportar</button></div>
-          <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white"><table className="w-full min-w-max text-left text-xs"><thead className="border-b bg-[#fcfdff] text-slate-500"><tr><th className="p-4"><input type="checkbox" disabled aria-label="Selecionar tudo"/></th>{cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":c:c}</th>)}</tr></thead><tbody>{tab==="Contas"?adAccounts.map(a=><tr className="border-b" key={a.id}><td className="p-4">•</td>{cols.map(c=><td key={c} className="px-4 py-4">{c==="Campanha"?a.name:c==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):tab==="Campanhas"?campaigns.filter(c=>status==="Qualquer"||(status==="Ativo"?c.effective_status==="ACTIVE":c.effective_status!=="ACTIVE")).filter(c=>c.name.toLowerCase().includes(query.toLowerCase())).map(c=><tr className="border-b" key={c.id}><td className="p-4">•</td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?c.name:column==="Status"?c.effective_status:column==="Gasto"?money(c.spend,currency):column==="Impressões"?c.impressions.toLocaleString("pt-BR"):column==="Cliques"?c.clicks.toLocaleString("pt-BR"):column==="CPC"?money(c.cpc,currency):column==="CTR"?c.ctr.toFixed(2)+"%":column==="Orçamento"?c.daily_budget?money(Number(c.daily_budget)/100,currency)+" / dia":c.lifetime_budget?money(Number(c.lifetime_budget)/100,currency):"—":"—"}</td>)}</tr>):null}
+          <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white"><table className="w-full min-w-max text-left text-xs"><thead className="border-b bg-[#fcfdff] text-slate-500"><tr><th className="p-4"><input type="checkbox" disabled aria-label="Selecionar tudo"/></th>{cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":c:c}</th>)}</tr></thead><tbody>{tab==="Contas"?adAccounts.map(a=><tr className="border-b" key={a.id}><td className="p-4">•</td>{cols.map(c=><td key={c} className="px-4 py-4">{c==="Campanha"?a.name:c==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):tab==="Campanhas"?campaigns.filter(c=>status==="Qualquer"||(status==="Ativo"?c.effective_status==="ACTIVE":c.effective_status!=="ACTIVE")).filter(c=>c.name.toLowerCase().includes(query.toLowerCase())).map(c=><tr className="border-b" key={c.id}><td className="p-4">•</td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?c.name:
+  column==="Status"?c.effective_status:
+  column==="Gasto"?money(c.spend,currency):
+  column==="Vendas Meta"?(c.purchases===null?"—":c.purchases.toLocaleString("pt-BR")):
+  column==="Vendas TrackUp"?"—":
+  column==="Faturamento"?(c.purchase_value===null?"—":money(c.purchase_value,currency)):
+  column==="ROAS"?(c.meta_roas===null?"—":c.meta_roas.toFixed(2)+"x"):
+  column==="CPA"?(c.meta_cpa===null?"—":money(c.meta_cpa,currency)):
+  column==="ARPU"?(c.meta_arpu===null?"—":money(c.meta_arpu,currency)):
+  column==="Impressões"?c.impressions.toLocaleString("pt-BR"):
+  column==="Cliques"?c.clicks.toLocaleString("pt-BR"):
+  column==="CPC"?money(c.cpc,currency):
+  column==="CTR"?c.ctr.toFixed(2)+"%":
+  column==="Orçamento"?c.daily_budget?money(Number(c.daily_budget)/100,currency)+" / dia":c.lifetime_budget?money(Number(c.lifetime_budget)/100,currency):"—":
+  "—"}</td>)}</tr>):null}
   {(tab==="Contas"?adAccounts.length===0:tab==="Campanhas"?campaigns.length===0:true)&&<tr><td colSpan={cols.length+1} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta de anúncios retornada pela Meta.":tab==="Campanhas"?(campaignBusy?"Consultando campanhas...":campaignError||"Nenhuma campanha retornada para o período ou conta selecionada."):"Consulta de conjuntos e anúncios será adicionada depois."} {(!metaSession)&&<button className="ml-2 font-semibold text-blue-600 underline" onClick={()=>setPage("Integrações")}>Conectar Facebook</button>}</td></tr>}</tbody></table></div>
         </div>}
         {page==="Integrações"&&<div className="space-y-5"><p className="text-sm text-slate-500">Conecte suas contas de anúncios e configure o rastreamento.</p><div className="flex gap-1 overflow-auto border-b border-[#dce3f1]">{["Facebook Ads","Pixel de Rastreio","UTMs","Webhook API"].map(t=><button key={t} onClick={()=>setIntegration(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===integration?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div><div className="max-w-4xl rounded-xl border border-[#dae3f2] bg-white p-6">{integration==="Facebook Ads"?<><h2 className="mb-3 flex items-center gap-2 font-semibold"><Facebook size={22} className="text-blue-600"/> Conectar com Facebook</h2><p className="mb-5 text-sm leading-6 text-slate-600">O login será realizado pelo Facebook Login for Business oficial. Com as permissões necessárias, o sistema poderá listar contas de anúncios, campanhas ativas e pausadas e controlar os status pela Marketing API.</p>
@@ -279,7 +333,7 @@ function Home() {
   {metaConnections.length>0 && <p className="mb-3 text-sm text-green-700">{metaConnections.length} perfil(is) Facebook autorizado(s): {metaConnections.map(c=>c.name||c.meta_user_id).join(", ")}</p>}
   {adAccounts.length===0?<p className="text-sm text-slate-500">{loadingAccounts?"Buscando suas contas na Meta...":"Nenhuma conta de anúncios retornada. Conecte o Facebook ou verifique as permissões de acesso."}</p>:<div className="space-y-2">{adAccounts.map(a=><div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3"><div><strong className="block text-sm">{a.name}</strong><span className="text-xs text-slate-500">{a.id} · {a.currency}</span></div><span className={"rounded-full px-3 py-1 text-xs "+(a.account_status===1?"bg-green-50 text-green-700":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span></div>)}</div>}
   {accountWarning.map((warning,i)=><p key={i} className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
-  <p className="mt-3 text-xs text-slate-500">A listagem é consultada diretamente na Marketing API. Relatórios de gastos e campanhas ainda serão sincronizados em uma etapa separada.</p>
+  <p className="mt-3 text-xs text-slate-500">A listagem é consultada diretamente na Marketing API. Gastos e campanhas são consultados pela API da Meta. Valores de compras e ROAS são atribuídos pelo Facebook quando disponíveis e não substituem vendas confirmadas pelo checkout.</p>
 </div></>:<><h2 className="mb-3 font-semibold">{integration}</h2><p className="text-sm text-slate-500">Reservado para uma próxima etapa, depois do login com Facebook e da consulta de campanhas.</p></>}</div></div>}
         {updated&&<p className="mt-5 text-xs text-slate-400">Interface atualizada às {updated}. Dados externos dependem da integração.</p>}
       </main>
