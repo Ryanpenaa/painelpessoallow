@@ -28,6 +28,7 @@ function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
   const [connectBusy, setConnectBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [oauthMessage, setOauthMessage] = useState("");
@@ -86,9 +87,20 @@ function Home() {
       ? await supabase.auth.signInWithPassword(credentials)
       : await supabase.auth.signUp({...credentials, options:{emailRedirectTo:window.location.origin}});
     setAuthBusy(false);
-    if(error) setAuthMessage(error.message);
+    if(error) {
+      if(error.message.toLowerCase().includes("invalid login credentials")) setAuthMessage("Este e-mail e senha não foram reconhecidos. Se é seu primeiro acesso, clique em Criar minha conta.");
+      else if(error.message.toLowerCase().includes("email not confirmed")) setAuthMessage("Confirme seu e-mail pelo link recebido antes de entrar.");
+      else setAuthMessage(error.message);
+    }
     else if(mode==="signup" && !data.session) setAuthMessage("Cadastro recebido. Verifique seu e-mail para confirmar a conta e depois faça login.");
     else setAuthMessage("Acesso autorizado.");
+  };
+  const resetPassword = async () => {
+    if(!email.trim()) { setAuthMessage("Informe seu e-mail para recuperar a senha."); return; }
+    setAuthBusy(true);
+    const {error}=await supabase.auth.resetPasswordForEmail(email.trim(),{redirectTo:window.location.origin});
+    setAuthBusy(false);
+    setAuthMessage(error ? error.message : "Se o e-mail estiver cadastrado, você receberá instruções de recuperação.");
   };
   const startMetaConnection = async () => {
     setOauthMessage("");
@@ -143,14 +155,15 @@ function Home() {
         </div>}
         {page==="Integrações"&&<div className="space-y-5"><p className="text-sm text-slate-500">Conecte suas contas de anúncios e configure o rastreamento.</p><div className="flex gap-1 overflow-auto border-b border-[#dce3f1]">{["Facebook Ads","Pixel de Rastreio","UTMs","Webhook API"].map(t=><button key={t} onClick={()=>setIntegration(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===integration?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div><div className="max-w-4xl rounded-xl border border-[#dae3f2] bg-white p-6">{integration==="Facebook Ads"?<><h2 className="mb-3 flex items-center gap-2 font-semibold"><Facebook size={22} className="text-blue-600"/> Conectar com Facebook</h2><p className="mb-5 text-sm leading-6 text-slate-600">O login será realizado pelo Facebook Login for Business oficial. Com as permissões necessárias, o sistema poderá listar contas de anúncios, campanhas ativas e pausadas e controlar os status pela Marketing API.</p><div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">Integração Meta configurada para teste com usuários autorizados no aplicativo. Faça login no TrackUp para conectar sua conta.</div>
 {!session ? <div className="mb-5 max-w-md rounded-lg border border-slate-200 bg-slate-50 p-4">
-  <h3 className="mb-2 font-semibold">Acessar TrackUp</h3>
-  <p className="mb-3 text-xs text-slate-500">Crie seu acesso ou entre com seu e-mail e senha. O login do TrackUp é separado do Facebook.</p>
-  <form onSubmit={e=>{e.preventDefault(); void signInOrUp("login");}} className="space-y-3">
+  <h3 className="mb-2 font-semibold">{authMode==="signup"?"Criar meu acesso ao TrackUp":"Entrar no TrackUp"}</h3>
+  <p className="mb-3 text-xs text-slate-500">Primeiro crie um acesso ao TrackUp. Depois autorize o Facebook com sua conta de anúncios. São dois logins diferentes.</p>
+  <form onSubmit={e=>{e.preventDefault(); void signInOrUp(authMode);}} className="space-y-3">
     <input aria-label="E-mail TrackUp" type="email" required autoComplete="email" placeholder="Seu e-mail" value={email} onChange={e=>setEmail(e.target.value)} className={input+" w-full"}/>
-    <input aria-label="Senha TrackUp" type="password" required minLength={6} autoComplete="current-password" placeholder="Senha (mínimo 6 caracteres)" value={password} onChange={e=>setPassword(e.target.value)} className={input+" w-full"}/>
+    <input aria-label="Senha TrackUp" type="password" required minLength={6} autoComplete={authMode==="signup"?"new-password":"current-password"} placeholder="Senha (mínimo 6 caracteres)" value={password} onChange={e=>setPassword(e.target.value)} className={input+" w-full"}/>
     <div className="flex flex-wrap gap-2">
-      <button disabled={authBusy} type="submit" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{authBusy?"Aguarde...":"Entrar"}</button>
-      <button disabled={authBusy} type="button" onClick={()=>void signInOrUp("signup")} className={btn}>Criar conta</button>
+      <button disabled={authBusy} type="submit" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{authBusy?"Aguarde...":authMode==="signup"?"Criar minha conta":"Entrar"}</button>
+      <button disabled={authBusy} type="button" onClick={()=>{setAuthMode(authMode==="signup"?"login":"signup");setAuthMessage("");}} className={btn}>{authMode==="signup"?"Já tenho conta":"Primeiro acesso? Criar conta"}</button>
+      {authMode==="login" && <button disabled={authBusy} type="button" onClick={()=>void resetPassword()} className="text-xs text-blue-700 underline">Esqueci minha senha</button>}
     </div>
   </form>
   {authMessage && <p role="status" className="mt-3 text-sm text-slate-700">{authMessage}</p>}
