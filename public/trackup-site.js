@@ -88,19 +88,39 @@
     observer.observe(document.documentElement,{childList:true,subtree:true});
   }
   report("page_view");
-  // If no Pixel is already present, initialize the configured product pixel.
-  // If the page already has a Pixel, avoid injecting another duplicate Pixel base.
+  // Associate this product with exactly the Pixel configured server-side.
+  // If a pixel already exists on the site, don't run global fbq('track'):
+  // global tracking would send this product's event to unrelated Pixels.
   fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
     if(!cfg||!cfg.pixel_id||!/^\d{8,30}$/.test(cfg.pixel_id))return;
-    if(typeof window.fbq==="function")return;
-    !function(f,b,e,v,n,t,s){
-      if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments);};
-      if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version="2.0";n.queue=[];
-      t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);
-    }(window,document,"script","https://connect.facebook.net/en_US/fbevents.js");
-    window.fbq("init",cfg.pixel_id);
-    window.fbq("track","PageView");
-    window.fbq("track","ViewContent",{content_ids:[product],content_type:"product"});
+    var id=String(cfg.pixel_id);
+    var hasFbq=typeof window.fbq==="function";
+    if(!hasFbq){
+      !function(f,b,e,v,n,t,s){
+        if(f.fbq)return;
+        n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments);};
+        if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version="2.0";n.queue=[];
+        t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);
+      }(window,document,"script","https://connect.facebook.net/en_US/fbevents.js");
+    }
+    var pixels=[];
+    try{
+      if(typeof window.fbq.getState==="function"){
+        var state=window.fbq.getState();
+        pixels=Array.isArray(state&&state.pixels)?state.pixels.map(function(p){return String(p.id);}):[];
+      }
+    }catch(e){}
+    // Keep one init per Pixel per page load for this script.
+    var initialized=window.__trackupPixelIds||(window.__trackupPixelIds={});
+    var exists=pixels.indexOf(id)!==-1||initialized[id]===true;
+    if(exists)return; // Existing pixel already owns its PageView; don't double-count it.
+    // When a Pixel exists but its state cannot be inspected, don't risk
+    // initializing an unknown duplicate. CAPI still works server-side.
+    if(hasFbq&&typeof window.fbq.getState!=="function")return;
+    initialized[id]=true;
+    window.fbq("init",id);
+    window.fbq("trackSingle",id,"PageView");
+    window.fbq("trackSingle",id,"ViewContent",{content_ids:[product],content_type:"product"});
     setTimeout(function(){report("page_view");},1800);
   }).catch(function(){});
 })();
