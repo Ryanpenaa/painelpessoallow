@@ -4,10 +4,12 @@ import {Copy,Plus,RefreshCw,ShieldCheck,Link2,CheckCircle2,AlertTriangle} from "
 const endpoint="https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/trackup-checkouts";
 type Product={id:string;name:string;currency:string;active:boolean};
 type Connection={id:string;product_id:string;platform:string;external_product_id:string|null;webhook_url:string|null;enabled:boolean;last_event_at:string|null};
+type TrackedSale={id:string;product_name:string;platform:string;status:string;transaction_id:string;payment_method:string;amount:number;currency:string;campaign_id:string|null;utm_campaign:string|null;tracking_visit_code:string|null;meta_delivery:string;created_at:string};
 const platforms=[{id:"cakto",name:"Cakto"},{id:"hotmart",name:"Hotmart"},{id:"vega",name:"Vega Checkout"},{id:"other",name:"Outra plataforma"}];
 export default function CheckoutIntegrations({session}:{session:string|null}){
  const [products,setProducts]=useState<Product[]>([]);
  const [connections,setConnections]=useState<Connection[]>([]);
+ const [recentSales,setRecentSales]=useState<TrackedSale[]>([]);
  const [name,setName]=useState("");
  const [currency,setCurrency]=useState("BRL");
  const [productId,setProductId]=useState("");
@@ -35,6 +37,8 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
    const data=await fetchApi("list");
    setProducts(data.products||[]);
    setConnections(data.connections||[]);
+   const recent=await fetchApi("recent_sales").catch(()=>({sales:[]}));
+   setRecentSales(recent.sales||[]);
    setProductId(id=>(data.products||[]).some((p:Product)=>p.id===id)?id:(data.products||[])[0]?.id||"");
   }catch(e){setError(e instanceof Error?e.message:"Não foi possível carregar produtos.");}
  };
@@ -142,6 +146,22 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
       <div className="flex items-center gap-2"><input className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[11px]" value={c.webhook_url||""} readOnly aria-label="URL exclusiva do webhook"/><button className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>c.webhook_url&&navigator.clipboard.writeText(c.webhook_url)} disabled={!c.webhook_url}><Copy size={14}/>Copiar</button></div>
     </div>)}
     {!connections.length&&<p className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Nenhum webhook configurado. Crie um produto e gere sua primeira conexão.</p>}
+   </div>
+  </section>
+  <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
+   <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Últimas vendas e origem dos anúncios</h3><span className="text-xs text-slate-500">{recentSales.length} registros recentes</span></div>
+   <div className="overflow-x-auto">
+    <table className="w-full min-w-[720px] text-left text-xs">
+     <thead className="border-b text-slate-500"><tr><th className="p-3">Produto / plataforma</th><th className="p-3">Venda</th><th className="p-3">Campanha (UTM / ID)</th><th className="p-3">Identificou visita?</th><th className="p-3">Meta CAPI</th></tr></thead>
+     <tbody>{recentSales.map(sale=><tr key={sale.id} className="border-b border-slate-100">
+      <td className="p-3"><strong className="block">{sale.product_name}</strong><span className="text-slate-500">{sale.platform}</span></td>
+      <td className="p-3"><strong className="block">{sale.status}</strong><span>{new Intl.NumberFormat("pt-BR",{style:"currency",currency:sale.currency}).format(sale.amount)}</span><span className="block text-[10px] text-slate-400">{sale.transaction_id}</span></td>
+      <td className="p-3"><span className="block break-all">{sale.utm_campaign||"—"}</span><span className="block break-all text-slate-500">{sale.campaign_id||"ID da campanha não captado"}</span></td>
+      <td className="p-3">{sale.tracking_visit_code?"Sim":"Não"}</td>
+      <td className="p-3">{sale.meta_delivery==="sent"?"Enviado":sale.meta_delivery==="failed"?"Falhou":sale.meta_delivery==="pending"?"Pendente":"Não enviado"}</td>
+     </tr>)}</tbody>
+    </table>
+    {!recentSales.length&&<p className="py-8 text-center text-xs text-slate-500">Sem vendas recebidas por webhook. Quando entrar uma compra, o TrackUp mostrará aqui a campanha identificada e a situação do envio à Meta.</p>}
    </div>
   </section>
   <div className="flex items-start gap-3 rounded-lg bg-amber-50 p-4 text-xs leading-5 text-amber-800"><AlertTriangle size={18} className="shrink-0"/><span>Webhooks recebem novas notificações, não recuperam vendas antigas automaticamente. Antes de usar comercialmente, faça um evento de teste e confira a venda em TrackUp. Nunca coloque a URL secreta em anúncios ou páginas públicas.</span></div>
