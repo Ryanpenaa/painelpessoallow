@@ -41,8 +41,13 @@ function Home() {
   useEffect(()=>{
     if(visibilityLoaded)localStorage.setItem("trackup.meta.hidden-accounts.v1",JSON.stringify(hiddenAccountIds));
   },[visibilityLoaded,hiddenAccountIds]);
-  const visibleAccounts=adAccounts.filter(a=>!hiddenAccountIds.includes(a.id));
-  const setAccountEnabled=(id:string,enabled:boolean)=>setHiddenAccountIds(old=>enabled?old.filter(x=>x!==id):Array.from(new Set([...old,id])));
+  const visibleAccounts=adAccounts.filter(a=>visibilityLoaded&&!hiddenAccountIds.includes(a.id));
+  const setAccountEnabled=(id:string,enabled:boolean)=>{
+    setHiddenAccountIds(old=>enabled?old.filter(x=>x!==id):Array.from(new Set([...old,id])));
+    if(!enabled && selectedAccount===id){
+      setSummary(null);setCampaigns([]);setEntityRows([]);setLastMetaUpdate("");
+    }
+  };
   const enableAllAccounts=()=>setHiddenAccountIds([]);
   const hideAllAccounts=()=>setHiddenAccountIds(old=>Array.from(new Set([...old,...adAccounts.map(a=>a.id)])));
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
@@ -97,7 +102,7 @@ function Home() {
   useEffect(()=>{
     if(!visibilityLoaded)return;
     setSelectedAccount(current=>visibleAccounts.some(a=>a.id===current)?current:(visibleAccounts[0]?.id||""));
-    if(!visibleAccounts.length){setSummary(null);setCampaigns([]);setEntityRows([]);}
+    if(!visibleAccounts.length){setSummary(null);setCampaigns([]);setEntityRows([]);setLastMetaUpdate("");}
   },[visibilityLoaded,hiddenAccountIds,adAccounts]);
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
@@ -133,7 +138,7 @@ function Home() {
       setMetaTokenExpiresAt(status.meta_token_expires_at||null);
       const result=await api("accounts",{},token);
       setAdAccounts(result.accounts||[]);
-      setSelectedAccount(current=>(result.accounts||[]).some((a:{id:string})=>a.id===current)?current:(result.accounts||[])[0]?.id||"");
+      // The visible accounts effect selects an enabled account, never a hidden one.
       setAccountWarning(result.warnings||[]);
     }catch(e){
       setOauthMessage(e instanceof Error?e.message:"Erro ao carregar contas do Facebook.");
@@ -177,7 +182,7 @@ function Home() {
     else {setMetaConnections([]);setAdAccounts([]);setCampaigns([]);setSelectedAccount("");setOwnerProfile(null);setMetaTokenExpiresAt(null);}
   },[metaSession]);
   const loadCampaigns=async()=>{
-    if(!metaSession || !selectedAccount || hiddenAccountIds.includes(selectedAccount)){setCampaigns([]);return;}
+    if(!metaSession || !selectedAccount || !visibleAccounts.some(a=>a.id===selectedAccount)){setCampaigns([]);return;}
     if(campaignsLock.current || Date.now()<throttleUntil.current)return;
     campaignsLock.current=true;
     setCampaignBusy(true);
@@ -192,7 +197,7 @@ function Home() {
     }finally{setCampaignBusy(false);campaignsLock.current=false;}
   };
   const loadSummary=async()=>{
-    if(!metaSession || !selectedAccount || hiddenAccountIds.includes(selectedAccount) || summaryLock.current || Date.now()<throttleUntil.current)return;
+    if(!metaSession || !selectedAccount || !visibleAccounts.some(a=>a.id===selectedAccount) || summaryLock.current || Date.now()<throttleUntil.current)return;
     summaryLock.current=true;
     try{
       const range=rangeDates();
@@ -233,7 +238,7 @@ function Home() {
   },[autoRefresh,metaSession,selectedAccount,period,since,until]);
 
   const loadEntities=async()=>{
-    if(!metaSession||!selectedAccount||hiddenAccountIds.includes(selectedAccount)||tab==="Contas"){setEntityRows([]);return;}
+    if(!metaSession||!selectedAccount||!visibleAccounts.some(a=>a.id===selectedAccount)||tab==="Contas"){setEntityRows([]);return;}
     if(Date.now()<throttleUntil.current)return;
     const request=++entityRequest.current;
     setEntityBusy(true);setEntityError("");
@@ -270,7 +275,7 @@ function Home() {
   const money=(value:number,currency="BRL")=>new Intl.NumberFormat("pt-BR",{style:"currency",currency}).format(value);
   const currency=adAccounts.find(a=>a.id===selectedAccount)?.currency||"BRL";
   const metricValue=(name:string)=>{
-    if(!summary)return "—";
+    if(!summary||!visibleAccounts.some(a=>a.id===selectedAccount))return "—";
     const count=(n:number|null)=>n===null?"—":n.toLocaleString("pt-BR");
     const currencyValue=(n:number|null)=>n===null?"—":money(n,currency);
     const percentage=(n:number|null)=>n===null?"—":n.toFixed(2)+"%";
@@ -293,7 +298,7 @@ function Home() {
   };
   const metricTitle=(name:string)=>name==="Faturamento"?"Valor de compras (Meta)":name==="Vendas aprovadas"?"Compras atribuídas (Meta)":name==="CPA"?"CPA (Meta)":name==="ARPU"?"Ticket médio (Meta)":name==="ROAS"?"ROAS (Meta)":name;
   const metricOrigin=(name:string)=>{
-    if(!summary)return selectedAccount?"Aguardando dados da Meta":"Selecione uma conta";
+    if(!summary)return !visibleAccounts.length?"Ative contas em Integrações → Facebook Ads":selectedAccount?"Aguardando dados da Meta":"Selecione uma conta";
     if(["Faturamento","CPA","ARPU","ROAS","Vendas aprovadas","Checkouts iniciados"].includes(name))
       return "Conversões atribuídas pela Meta · não são vendas confirmadas";
     if(["Gasto em Ads","CPC","CTR","CPM","Cliques","Impressões"].includes(name))
@@ -349,7 +354,7 @@ function Home() {
       <main className="min-w-0 flex-1 p-4 md:p-7">
         <header className="mb-5 flex flex-wrap items-center gap-3"><button className={btn+" md:hidden"} onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={18}/></button><h1 className="mr-auto text-xl font-bold md:text-2xl">{page==="Painel"?"Dashboard Principal":page}</h1>{page==="Painel"&&<div className="flex flex-wrap gap-1">{periods.map(p=><button className={btn+(period===p?" border-blue-500 bg-blue-50 text-blue-700":"")} key={p} onClick={()=>setPeriod(p)}>{p}</button>)}</div>}</header>
         {page==="Painel"&&<div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
+          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={visibleAccounts.some(a=>a.id===selectedAccount)?selectedAccount:""} onChange={e=>setSelectedAccount(e.target.value)} disabled={!visibleAccounts.length}><option value="">{visibleAccounts.length?"Selecione uma conta":"Nenhuma conta ativada"}</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
   <span className="font-semibold text-slate-800">{metaSession?"Meta Ads conectada":"Meta Ads desconectada"}</span>
   {ownerProfile&&<span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-800">Perfil pessoal: {ownerProfile.email}</span>}
@@ -359,7 +364,8 @@ function Home() {
   {syncIssue&&<span role="alert" className="text-amber-700">{syncIssue}</span>}
   <span className="text-slate-500">Os dados podem ter atraso de processamento na Meta.</span>
 </div>
-<div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {visibleAccounts.length} conta(s) visível(is) de {adAccounts.length} autorizada(s). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
+<div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {visibleAccounts.length} conta(s) habilitada(s) no painel de {adAccounts.length} autorizada(s). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
+          {metaSession&&adAccounts.length>0&&<div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>Mostrando somente contas habilitadas em Integrações: <strong>{visibleAccounts.length}</strong> de {adAccounts.length}</span><button className="font-semibold text-blue-700 underline" onClick={()=>{setPage("Integrações");setIntegration("Facebook Ads");}}>Gerenciar contas exibidas</button></div>}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5">
   <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{metricTitle(c)}</div>
   <div className="text-2xl font-bold">{hide?"••••":metricValue(c)}</div>
@@ -388,7 +394,7 @@ function Home() {
       {visibleAccounts.length?visibleAccounts.map(a=><button key={a.id} onClick={()=>setSelectedAccount(a.id)} className={"flex w-full min-w-0 items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors "+(selectedAccount===a.id?"border-blue-400 bg-blue-50":"border-slate-200 hover:bg-slate-50")}>
         <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold text-slate-800" title={a.name}>{a.name}</div><div className="truncate text-[11px] text-slate-500">{a.id} · {a.currency}</div></div>
         <span className={"shrink-0 rounded-full px-2 py-1 text-[10px] "+(a.account_status===1?"bg-green-100 text-green-800":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span>
-      </button>):<div className="py-12 text-center text-sm text-slate-400">Nenhuma conta conectada.</div>}
+      </button>):<div className="py-12 text-center text-sm text-slate-400">Nenhuma conta habilitada. Ative as contas em Integrações.</div>}
     </div>
     <p className="mt-3 text-xs text-slate-500">Clique em uma conta para visualizar os indicadores dela no painel.</p>
   </section>
