@@ -104,7 +104,7 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
  const inputClass="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500";
  return <div className="space-y-5">
   <div className="flex flex-wrap items-start justify-between gap-3">
-   <div><h2 className="text-lg font-semibold text-[#102142]">Integração de vendas por produto</h2><p className="mt-1 text-sm text-slate-500">Uma conexão exclusiva por produto e plataforma. Eventos de aprovação, pendência, reembolso e chargeback alimentam o TrackUp.</p></div>
+   <div><h2 className="text-lg font-semibold text-[#102142]">Integração de vendas por produto</h2><p className="mt-1 text-sm text-slate-500">Uma conexão exclusiva por produto e plataforma. Eventos de aprovação, pendência, reembolso e chargeback alimentam o TrackUp.</p><p className="mt-2 inline-flex items-center gap-1 rounded-lg bg-green-50 px-2 py-1 text-xs font-medium text-green-800"><ShieldCheck size={14}/>Produtos, URLs, Hottok e Pixel ficam guardados com segurança no Supabase, mesmo após fechar o TrackUp.</p></div>
    <button onClick={()=>void refresh()} disabled={busy||!session} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold"><RefreshCw size={15}/>Atualizar</button>
   </div>
   {!session&&<p className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Faça login com seu Facebook pessoal em Integrações → Facebook Ads antes de cadastrar produtos.</p>}
