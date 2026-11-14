@@ -1,4 +1,4 @@
-import {useEffect,useState} from "react";
+import {useEffect,useRef,useState} from "react";
 import {Copy,Plus,RefreshCw,ShieldCheck,Link2,CheckCircle2,AlertTriangle} from "lucide-react";
 
 const endpoint="https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/trackup-checkouts";
@@ -25,6 +25,19 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
  const [busy,setBusy]=useState(false);
  const [feedback,setFeedback]=useState("");
  const [error,setError]=useState("");
+ const [copiedKey,setCopiedKey]=useState("");
+ const copyReset=useRef<ReturnType<typeof setTimeout>|null>(null);
+ useEffect(()=>()=>{if(copyReset.current)clearTimeout(copyReset.current);},[]);
+ const copyValue=async(value:string,key:string)=>{
+  try{
+   await navigator.clipboard.writeText(value);
+   setCopiedKey(key);
+   if(copyReset.current)clearTimeout(copyReset.current);
+   copyReset.current=setTimeout(()=>setCopiedKey(""),1500);
+  }catch{
+   setError("Não foi possível copiar automaticamente. Selecione e copie o texto.");
+  }
+ };
  const fetchApi=async(action:string,details:Record<string,unknown>={})=>{
    if(!session)throw Error("Conecte seu Facebook antes de cadastrar integrações.");
    const res=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session},body:JSON.stringify({action,...details})});
@@ -144,11 +157,11 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
    <div className="mb-3 flex items-center gap-2"><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">4</span><h3 className="font-semibold">Código de rastreamento da página</h3></div>
    <p className="mb-3 text-xs leading-5 text-slate-600">Instale o código na página de vendas do produto selecionado. O TrackUp captura os parâmetros de anúncio e acrescenta um identificador ao link do checkout, para conectar a visita à compra recebida por webhook.</p>
    <textarea className="h-20 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs" readOnly value={installCode} placeholder="Selecione um produto para gerar o código"/>
-   <button type="button" className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold" disabled={!installCode} onClick={()=>installCode&&navigator.clipboard.writeText(installCode)}><Copy size={14}/>Copiar código da página</button>
+   <button type="button" className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold" disabled={!installCode} onClick={()=>installCode&&void copyValue(installCode,"script")}><Copy size={14}/>{copiedKey==="script"?"Copiado!":"Copiar código da página"}</button>
    <div className="mt-4 rounded-lg border border-slate-200 p-3">
     <div className="mb-2 text-xs font-semibold text-slate-700">Parâmetros para colocar no URL do anúncio (Meta Ads)</div>
     <textarea readOnly value={adParams} className="h-20 w-full rounded-lg bg-slate-50 p-2 font-mono text-[11px]" aria-label="Parâmetros Meta para atribuição"/>
-    <button type="button" className="mt-2 flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>navigator.clipboard.writeText(adParams)}><Copy size={14}/>Copiar parâmetros da campanha</button>
+    <button type="button" className="mt-2 flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>void copyValue(adParams,"params")}><Copy size={14}/>{copiedKey==="params"?"Copiado!":"Copiar parâmetros da campanha"}</button>
     <p className="mt-2 text-[11px] text-slate-500">Acrescente esses parâmetros ao link da página de vendas. O TrackUp grava campanha, conjunto e anúncio e tenta associar à transação via identificador enviado ao checkout. A Meta faz sua própria atribuição usando fbp/fbc e outros identificadores; não é possível forçar uma campanha no evento CAPI.</p>
    </div>
    <p className="mt-3 text-xs text-amber-700">Evite duplicar o evento Purchase: se seu checkout já envia Purchase por Pixel/CAPI para esse mesmo Pixel, desative o envio paralelo ou configure deduplicação com o mesmo event_id antes de ativar esta integração. Siga também os requisitos de consentimento e privacidade aplicáveis.</p>
@@ -162,7 +175,7 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2 text-sm font-semibold">{products.find(p=>p.id===c.product_id)?.name||"Produto"}<span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">{platforms.find(p=>p.id===c.platform)?.name||c.platform}</span></div><div className="mt-1 text-xs text-slate-500">ID plataforma: {c.external_product_id||"não informado"} · Último evento: {c.last_event_at?new Date(c.last_event_at).toLocaleString("pt-BR"):"aguardando"}</div></div>
        <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={c.enabled} onChange={()=>void toggle(c)} disabled={busy} className="h-4 w-4 accent-blue-600"/>{c.enabled?"Ativo":"Desativado"}</label>
       </div>
-      <div className="flex items-center gap-2"><input className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[11px]" value={c.webhook_url||""} readOnly aria-label="URL exclusiva do webhook"/><button className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>c.webhook_url&&navigator.clipboard.writeText(c.webhook_url)} disabled={!c.webhook_url}><Copy size={14}/>Copiar</button></div>
+      <div className="flex items-center gap-2"><input className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[11px]" value={c.webhook_url||""} readOnly aria-label="URL exclusiva do webhook"/><button className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>c.webhook_url&&void copyValue(c.webhook_url,"webhook-"+c.id)} disabled={!c.webhook_url}><Copy size={14}/>{copiedKey==="webhook-"+c.id?"Copiado!":"Copiar"}</button></div>
       {(c.platform==="hotmart"||c.platform==="cakto")&&<div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="mb-2 text-xs font-semibold text-slate-700">{c.platform==="hotmart"?"Autenticação Hotmart (Hottok)":"Segredo do webhook Cakto"} — {c.has_provider_secret?"Configurado":"Pendente"}</div>
         <p className="mb-2 text-[11px] text-slate-500">{c.has_provider_secret?"Você pode substituir a chave salva se necessário.":"Cadastre a URL acima no checkout, obtenha a chave de autenticação e cole aqui para habilitar o processamento seguro."}</p>
