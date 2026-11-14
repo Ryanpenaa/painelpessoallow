@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import TrackupDashboard, { type MetaDashboardSummary } from "../components/TrackupDashboard";
 import { useEffect, useRef, useState } from "react";
 import { BarChart3, Megaphone, Plug, Pencil, RefreshCw, Eye, EyeOff, Download, X, Menu, Facebook, Search } from "lucide-react";
 
@@ -52,7 +53,7 @@ function Home() {
   const hideAllAccounts=()=>setHiddenAccountIds(old=>Array.from(new Set([...old,...adAccounts.map(a=>a.id)])));
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
-  const [summary, setSummary] = useState<{spend:number;clicks:number;impressions:number;cpc:number;ctr:number;cpm:number;reach:number;frequency:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}|null>(null);
+  const [summary, setSummary] = useState<MetaDashboardSummary|null>(null);
   const [lastMetaUpdate, setLastMetaUpdate] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [syncIssue, setSyncIssue] = useState("");
@@ -364,41 +365,15 @@ function Home() {
   {syncIssue&&<span role="alert" className="text-amber-700">{syncIssue}</span>}
   <span className="text-slate-500">Os dados podem ter atraso de processamento na Meta.</span>
 </div>
-<div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {visibleAccounts.length} conta(s) habilitada(s) no painel de {adAccounts.length} autorizada(s). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
-          {metaSession&&adAccounts.length>0&&<div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>Mostrando somente contas habilitadas em Integrações: <strong>{visibleAccounts.length}</strong> de {adAccounts.length}</span><button className="font-semibold text-blue-700 underline" onClick={()=>{setPage("Integrações");setIntegration("Facebook Ads");}}>Gerenciar contas exibidas</button></div>}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5">
-  <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{metricTitle(c)}</div>
-  <div className="text-2xl font-bold">{hide?"••••":metricValue(c)}</div>
-  <div className="mt-2 text-xs text-slate-400">{metricOrigin(c)}</div>
-</div>)}</div>
-          <div className="grid min-w-0 gap-4 lg:grid-cols-5">
-  <section className="min-w-0 rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-6 lg:col-span-3">
-    <h2 className="border-b pb-4 text-sm font-semibold">Funil de Conversão (Meta Ads)</h2>
-    {!summary?<div className="flex min-h-56 items-center justify-center text-center text-sm text-slate-400">{metaSession?"Selecione uma conta para consultar os dados da Meta.":"Conecte o Facebook para consultar o funil."}</div>:
-    <div className="space-y-4 py-6">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Impressões</div><div className="mt-1 text-xl font-bold">{summary.impressions.toLocaleString("pt-BR")}</div></div>
-        <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Cliques</div><div className="mt-1 text-xl font-bold">{summary.clicks.toLocaleString("pt-BR")}</div></div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Checkouts iniciados (Meta)</div><div className="mt-1 text-xl font-bold">{summary.checkouts===null?"—":summary.checkouts.toLocaleString("pt-BR")}</div></div>
-        <div className="rounded-lg bg-slate-50 p-4"><div className="text-xs text-slate-500">Compras atribuídas (Meta)</div><div className="mt-1 text-xl font-bold">{summary.purchases===null?"—":summary.purchases.toLocaleString("pt-BR")}</div></div>
-      </div>
-      <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600" style={{width:Math.min(100,summary.impressions?summary.clicks/summary.impressions*100:0)+"%"}}/></div>
-      <p className="text-xs text-slate-500">CTR: {summary.ctr.toFixed(2)}% · Gasto: {money(summary.spend,currency)}. Compras e checkouts são atribuídos pela Meta quando os eventos estão disponíveis; vendas confirmadas dependem do checkout.</p>
-    </div>}
-  </section>
-  <section className="min-w-0 rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-6 lg:col-span-2">
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4"><h2 className="text-sm font-semibold">Resumo por conta</h2><span className="text-xs text-slate-500">{visibleAccounts.length} contas visíveis</span></div>
-    <div className="mt-3 max-h-80 min-w-0 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
-      {visibleAccounts.length?visibleAccounts.map(a=><button key={a.id} onClick={()=>setSelectedAccount(a.id)} className={"flex w-full min-w-0 items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors "+(selectedAccount===a.id?"border-blue-400 bg-blue-50":"border-slate-200 hover:bg-slate-50")}>
-        <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold text-slate-800" title={a.name}>{a.name}</div><div className="truncate text-[11px] text-slate-500">{a.id} · {a.currency}</div></div>
-        <span className={"shrink-0 rounded-full px-2 py-1 text-[10px] "+(a.account_status===1?"bg-green-100 text-green-800":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span>
-      </button>):<div className="py-12 text-center text-sm text-slate-400">Nenhuma conta habilitada. Ative as contas em Integrações.</div>}
-    </div>
-    <p className="mt-3 text-xs text-slate-500">Clique em uma conta para visualizar os indicadores dela no painel.</p>
-  </section>
-</div>
+<TrackupDashboard
+  summary={visibleAccounts.some(a=>a.id===selectedAccount)?summary:null}
+  accountId={visibleAccounts.some(a=>a.id===selectedAccount)?selectedAccount:""}
+  accountName={visibleAccounts.find(a=>a.id===selectedAccount)?.name||""}
+  enabledAccountCount={visibleAccounts.length}
+  currency={currency}
+  hide={hide}
+  onManageAccounts={()=>{setPage("Integrações");setIntegration("Facebook Ads");}}
+/>
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
           <div className="flex overflow-x-auto border-b border-[#dce3f1]">
