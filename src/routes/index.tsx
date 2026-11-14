@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BarChart3, Megaphone, Plug, Pencil, RefreshCw, Eye, EyeOff, Download, X, Menu, Facebook, Search } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: Home });
@@ -29,6 +29,16 @@ function Home() {
   const [adAccounts, setAdAccounts] = useState<Array<{id:string;name:string;account_status:number;currency:string}>>([]);
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [summary, setSummary] = useState<{spend:number;clicks:number;impressions:number;cpc:number;ctr:number;cpm:number;reach:number;frequency:number}|null>(null);
+  const [lastMetaUpdate, setLastMetaUpdate] = useState("");
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [syncIssue, setSyncIssue] = useState("");
+  const summaryLock = useRef(false);
+  const campaignsLock = useRef(false);
+  const accountsLock = useRef(false);
+  const throttleUntil = useRef(0);
+  const syncAccount = useRef("");
+
   const [selectedAccount, setSelectedAccount] = useState("");
   const [campaigns, setCampaigns] = useState<Array<{id:string;name:string;status:string;effective_status:string;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number}>>([]);
   const [campaignBusy, setCampaignBusy] = useState(false);
@@ -57,6 +67,8 @@ function Home() {
     return result;
   };
   const loadMetaAccounts=async (token:string) => {
+    if(accountsLock.current)return;
+    accountsLock.current=true;
     setLoadingAccounts(true);
     try{
       const status=await api("status",{},token);
@@ -71,7 +83,7 @@ function Home() {
         localStorage.removeItem("trackup.meta.session");
         setMetaSession(null);
       }
-    }finally{setLoadingAccounts(false);}
+    }finally{setLoadingAccounts(false);accountsLock.current=false;}
   };
   useEffect(()=>{
     const parameters=new URLSearchParams(window.location.search);
@@ -108,6 +120,8 @@ function Home() {
   },[metaSession]);
   const loadCampaigns=async()=>{
     if(!metaSession || !selectedAccount){setCampaigns([]);return;}
+    if(campaignsLock.current || Date.now()<throttleUntil.current)return;
+    campaignsLock.current=true;
     setCampaignBusy(true);
     setCampaignError("");
     const dates=rangeDates();
@@ -117,10 +131,50 @@ function Home() {
     }catch(e){
       setCampaignError(e instanceof Error?e.message:"Não foi possível consultar campanhas da Meta.");
       setCampaigns([]);
-    }finally{setCampaignBusy(false);}
+    }finally{setCampaignBusy(false);campaignsLock.current=false;}
   };
-  useEffect(()=>{if(selectedAccount && metaSession)void loadCampaigns();},[selectedAccount,metaSession,period,since,until]);
-  const sum=(key:"spend"|"clicks"|"impressions")=>campaigns.reduce((total,c)=>total+c[key],0);
+  const loadSummary=async()=>{
+    if(!metaSession || !selectedAccount || summaryLock.current || Date.now()<throttleUntil.current)return;
+    summaryLock.current=true;
+    try{
+      const range=rangeDates();
+      const response=await api("summary",{account_id:selectedAccount,period,since:range.since,until:range.until},metaSession);
+      if(syncAccount.current===selectedAccount){
+        setSummary(response.summary);
+        setLastMetaUpdate(response.fetched_at||new Date().toISOString());
+        setSyncIssue("");
+      }
+    }catch(error){
+      const errorText=error instanceof Error?error.message:"Falha ao consultar Meta";
+      if(errorText.includes("Limite de consultas"))throttleUntil.current=Date.now()+300000;
+      setSyncIssue(errorText);
+    }finally{summaryLock.current=false;}
+  };
+  useEffect(()=>{
+    syncAccount.current=selectedAccount;
+    setSummary(null);
+    setLastMetaUpdate("");
+    if(selectedAccount && metaSession){void loadSummary();void loadCampaigns();}
+  },[selectedAccount,metaSession,period,since,until]);
+  useEffect(()=>{
+    if(!autoRefresh || !metaSession || !selectedAccount)return;
+    const active=()=>document.visibilityState==="visible" && navigator.onLine;
+    const summaryTimer=window.setInterval(()=>{if(active())void loadSummary();},60000);
+    const campaignTimer=window.setInterval(()=>{if(active())void loadCampaigns();},120000);
+    const accountsTimer=window.setInterval(()=>{if(active() && metaSession)void loadMetaAccounts(metaSession);},300000);
+    const resume=()=>{if(active()){void loadSummary();void loadCampaigns();}};
+    document.addEventListener("visibilitychange",resume);
+    window.addEventListener("online",resume);
+    return ()=>{
+      window.clearInterval(summaryTimer);
+      window.clearInterval(campaignTimer);
+      window.clearInterval(accountsTimer);
+      document.removeEventListener("visibilitychange",resume);
+      window.removeEventListener("online",resume);
+    };
+  },[autoRefresh,metaSession,selectedAccount,period,since,until]);
+
+  const sum=(key:"spend"|"clicks"|"impressions")=>summary?.[key]??0;
   const money=(value:number,currency="BRL")=>new Intl.NumberFormat("pt-BR",{style:"currency",currency}).format(value);
   const currency=adAccounts.find(a=>a.id===selectedAccount)?.currency||"BRL";
   const startMetaConnection=async()=>{
@@ -145,6 +199,7 @@ function Home() {
     if(metaSession)await api("logout",{},metaSession).catch(()=>{});
     localStorage.removeItem("trackup.meta.session");
     setMetaSession(null);
+    setSummary(null);
     setOauthMessage("Facebook desconectado deste navegador.");
   };
   useEffect(() => { try { const c = localStorage.getItem("trackup.cards"); const d = localStorage.getItem("trackup.cols"); if(c) setCards(JSON.parse(c)); if(d) setCols(JSON.parse(d)); } catch {} }, []);
@@ -168,9 +223,17 @@ function Home() {
       <main className="min-w-0 flex-1 p-4 md:p-7">
         <header className="mb-5 flex flex-wrap items-center gap-3"><button className={btn+" md:hidden"} onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={18}/></button><h1 className="mr-auto text-xl font-bold md:text-2xl">{page==="Painel"?"Dashboard Principal":page}</h1>{page==="Painel"&&<div className="flex flex-wrap gap-1">{periods.map(p=><button className={btn+(period===p?" border-blue-500 bg-blue-50 text-blue-700":"")} key={p} onClick={()=>setPeriod(p)}>{p}</button>)}</div>}</header>
         {page==="Painel"&&<div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
-          <div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {adAccounts.length} conta(s) disponível(is). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5"><div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{c}</div><div className="text-2xl font-bold">{hide?"••••":!selectedAccount?"—":c==="Gasto em Ads"?money(sum("spend"),currency):c==="Cliques"?sum("clicks").toLocaleString("pt-BR"):c==="Impressões"?sum("impressions").toLocaleString("pt-BR"):c==="CPC"?(sum("clicks")>0?money(sum("spend")/sum("clicks"),currency):"—"):c==="CTR"?(sum("impressions")>0?(sum("clicks")/sum("impressions")*100).toFixed(2)+"%":"—"):"—"}</div><div className="mt-2 text-xs text-slate-400">{selectedAccount&&["Gasto em Ads","Cliques","Impressões","CPC","CTR"].includes(c)?"Dados da Meta (campanhas)":"Aguardando integração de vendas"}</div></div>)}</div>
+          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+  <span className="font-semibold text-slate-800">{metaSession?"Meta Ads conectada":"Meta Ads desconectada"}</span>
+  <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)}/> Atualização automática</label>
+  <span>Indicadores: 60 s · campanhas: 120 s · contas: 5 min</span>
+  <span>Última consulta: {lastMetaUpdate?new Date(lastMetaUpdate).toLocaleTimeString("pt-BR"):"aguardando"}</span>
+  {syncIssue&&<span role="alert" className="text-amber-700">{syncIssue}</span>}
+  <span className="text-slate-500">Os dados podem ter atraso de processamento na Meta.</span>
+</div>
+<div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {adAccounts.length} conta(s) disponível(is). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5"><div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{c}</div><div className="text-2xl font-bold">{hide?"••••":!selectedAccount?"—":c==="Gasto em Ads"?(summary?money(sum("spend"),currency):"—"):c==="Cliques"?(summary?sum("clicks").toLocaleString("pt-BR"):"—"):c==="Impressões"?(summary?sum("impressions").toLocaleString("pt-BR"):"—"):c==="CPC"?(sum("clicks")>0?money(sum("spend")/sum("clicks"),currency):"—"):c==="CTR"?(sum("impressions")>0?(sum("clicks")/sum("impressions")*100).toFixed(2)+"%":"—"):"—"}</div><div className="mt-2 text-xs text-slate-400">{selectedAccount&&["Gasto em Ads","Cliques","Impressões","CPC","CTR"].includes(c)?"Dados da Meta (campanhas)":"Aguardando integração de vendas"}</div></div>)}</div>
           <div className="grid gap-4 lg:grid-cols-5"><div className="rounded-xl border border-[#dae3f2] bg-white p-6 lg:col-span-3"><h2 className="border-b pb-4 text-sm font-semibold">Funil de Conversão (Meta Ads)</h2><div className="flex min-h-56 items-center justify-center text-center text-sm text-slate-400">Funil disponível após conexão e rastreamento de eventos.</div></div><div className="rounded-xl border border-[#dae3f2] bg-white p-6 lg:col-span-2"><h2 className="border-b pb-4 text-sm font-semibold">Resumo por conta</h2><div className="flex min-h-56 items-center justify-center text-sm text-slate-400">{adAccounts.length?adAccounts.map(a=><div key={a.id} className="p-2"><strong>{a.name}</strong><span className="block text-xs">{a.id}</span></div>):"Nenhuma conta conectada."}</div></div></div>
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
