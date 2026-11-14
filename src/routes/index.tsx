@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { createClient, type Session } from "@supabase/supabase-js";
 import { BarChart3, Megaphone, Plug, Pencil, RefreshCw, Eye, EyeOff, Download, X, Menu, Facebook, Search } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: Home });
+const supabase = createClient("https://ystxfmrhbqybdilmuzwc.supabase.co", "sb_publishable_GAvjkE8dPmXTvDZmqNAYnw_akiILXaH");
+const metaOauthEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/meta-oauth-callback";
 const allCards = ["Faturamento", "Lucro operacional", "Gasto em Ads", "CPA", "ARPU", "ROAS", "ROI", "CPC", "CTR", "CPM", "Vendas aprovadas", "Vendas pendentes", "Chargeback", "Margem", "Cliques", "Impressões", "Checkouts iniciados"];
 const allCols = ["Status", "Campanha", "Última atualização", "Orçamento", "Gasto", "Vendas Meta", "Vendas TrackUp", "Vendas pendentes", "Faturamento", "Lucro", "ROAS", "CPA", "ARPU", "Impressões", "Cliques", "CPC", "CTR"];
 const periods = ["Hoje", "Ontem", "7 dias", "15 dias", "30 dias", "Personalizado"];
@@ -21,6 +24,54 @@ function Home() {
   const [query, setQuery] = useState("");
   const [mobile, setMobile] = useState(false);
   const [updated, setUpdated] = useState("");
+  const [session, setSession] = useState<Session | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+  const [oauthMessage, setOauthMessage] = useState("");
+  useEffect(() => {
+    let mounted = true;
+    void supabase.auth.getSession().then(({data}) => { if(mounted) setSession(data.session); });
+    const {data:{subscription}} = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if(mounted) setSession(nextSession);
+    });
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
+  const signInOrUp = async (mode: "login" | "signup") => {
+    setAuthMessage("");
+    if (!email.trim() || password.length < 6) { setAuthMessage("Informe um e-mail e senha com pelo menos 6 caracteres."); return; }
+    setAuthBusy(true);
+    const credentials = {email: email.trim(), password};
+    const {data,error} = mode==="login"
+      ? await supabase.auth.signInWithPassword(credentials)
+      : await supabase.auth.signUp({...credentials, options:{emailRedirectTo:window.location.origin}});
+    setAuthBusy(false);
+    if(error) setAuthMessage(error.message);
+    else if(mode==="signup" && !data.session) setAuthMessage("Cadastro recebido. Verifique seu e-mail para confirmar a conta e depois faça login.");
+    else setAuthMessage("Acesso autorizado.");
+  };
+  const startMetaConnection = async () => {
+    setOauthMessage("");
+    if(!session?.access_token) { setOauthMessage("Entre em sua conta TrackUp antes de conectar o Facebook."); return; }
+    setConnectBusy(true);
+    try {
+      const response=await fetch(metaOauthEndpoint,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":"Bearer "+session.access_token,"apikey":"sb_publishable_GAvjkE8dPmXTvDZmqNAYnw_akiILXaH"},
+        body: JSON.stringify({action:"authorize"})
+      });
+      const result=await response.json();
+      if(!response.ok || !result.authorization_url || !result.authorization_url.startsWith("https://www.facebook.com/")) {
+        throw new Error(result.error || "Não foi possível iniciar a autorização do Facebook.");
+      }
+      window.location.assign(result.authorization_url);
+    } catch(error) {
+      setOauthMessage(error instanceof Error ? error.message : "Falha na conexão. Tente novamente.");
+      setConnectBusy(false);
+    }
+  };
   useEffect(() => { try { const c = localStorage.getItem("trackup.cards"); const d = localStorage.getItem("trackup.cols"); if(c) setCards(JSON.parse(c)); if(d) setCols(JSON.parse(d)); } catch {} }, []);
   const change = (kind:"cards"|"cols", value:string) => {
     const current = kind==="cards"?cards:cols;
@@ -52,7 +103,23 @@ function Home() {
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4"><label className="flex flex-col gap-1 text-xs text-slate-500">Status<select value={status} onChange={e=>setStatus(e.target.value)} className={input}><option>Qualquer</option><option>Ativo</option><option>Pausado</option></select></label><label className="flex flex-col gap-1 text-xs text-slate-500">Período<select value={period} onChange={e=>setPeriod(e.target.value)} className={input}>{periods.map(p=><option key={p}>{p}</option>)}</select></label>{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input}/><input aria-label="Data final" type="date" className={input}/></>}<label className="flex flex-1 items-center gap-2 rounded-md border border-[#d9e1ef] bg-white px-3"><Search size={15}/><input className="min-w-28 flex-1 py-2 text-sm outline-none" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar por nome"/></label><button className={btn} onClick={()=>setEdit("cols")}>Colunas</button><button className={btn} onClick={refresh}>Atualizar</button><button className={btn} disabled title="Aguardando dados reais">Exportar</button></div>
           <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white"><table className="w-full min-w-max text-left text-xs"><thead className="border-b bg-[#fcfdff] text-slate-500"><tr><th className="p-4"><input type="checkbox" disabled aria-label="Selecionar tudo"/></th>{cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":c:c}</th>)}</tr></thead><tbody><tr><td colSpan={cols.length+1} className="px-6 py-20 text-center"><div className="mx-auto max-w-sm"><Megaphone size={30} className="mx-auto mb-3 text-slate-300"/><strong className="block text-base">Nenhum dado conectado</strong><p className="mt-2 text-sm text-slate-500">Ao autorizar o Facebook, as contas e suas campanhas reais aparecerão aqui. Pausar e ativar exigirá permissão oficial.</p><button className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-sm text-white" onClick={()=>setPage("Integrações")}>Ir para Integrações</button></div></td></tr></tbody></table></div>
         </div>}
-        {page==="Integrações"&&<div className="space-y-5"><p className="text-sm text-slate-500">Conecte suas contas de anúncios e configure o rastreamento.</p><div className="flex gap-1 overflow-auto border-b border-[#dce3f1]">{["Facebook Ads","Pixel de Rastreio","UTMs","Webhook API"].map(t=><button key={t} onClick={()=>setIntegration(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===integration?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div><div className="max-w-4xl rounded-xl border border-[#dae3f2] bg-white p-6">{integration==="Facebook Ads"?<><h2 className="mb-3 flex items-center gap-2 font-semibold"><Facebook size={22} className="text-blue-600"/> Conectar com Facebook</h2><p className="mb-5 text-sm leading-6 text-slate-600">O login será realizado pelo Facebook Login for Business oficial. Com as permissões necessárias, o sistema poderá listar contas de anúncios, campanhas ativas e pausadas e controlar os status pela Marketing API.</p><div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Configuração pendente: aplicativo Meta, App ID, App Secret, redirect OAuth e backend seguro. Não será necessário copiar tokens manualmente.</div><button disabled title="Login OAuth ainda não configurado" className="rounded-md bg-blue-600 px-5 py-3 font-semibold text-white opacity-50">Conectar com Facebook</button><p className="mt-6 border-t pt-4 text-sm text-slate-500">Nenhuma conta de anúncio conectada.</p></>:<><h2 className="mb-3 font-semibold">{integration}</h2><p className="text-sm text-slate-500">Reservado para uma próxima etapa, depois do login com Facebook e da consulta de campanhas.</p></>}</div></div>}
+        {page==="Integrações"&&<div className="space-y-5"><p className="text-sm text-slate-500">Conecte suas contas de anúncios e configure o rastreamento.</p><div className="flex gap-1 overflow-auto border-b border-[#dce3f1]">{["Facebook Ads","Pixel de Rastreio","UTMs","Webhook API"].map(t=><button key={t} onClick={()=>setIntegration(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===integration?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div><div className="max-w-4xl rounded-xl border border-[#dae3f2] bg-white p-6">{integration==="Facebook Ads"?<><h2 className="mb-3 flex items-center gap-2 font-semibold"><Facebook size={22} className="text-blue-600"/> Conectar com Facebook</h2><p className="mb-5 text-sm leading-6 text-slate-600">O login será realizado pelo Facebook Login for Business oficial. Com as permissões necessárias, o sistema poderá listar contas de anúncios, campanhas ativas e pausadas e controlar os status pela Marketing API.</p><div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">Integração Meta configurada para teste com usuários autorizados no aplicativo. Faça login no TrackUp para conectar sua conta.</div>
+{!session ? <div className="mb-5 max-w-md rounded-lg border border-slate-200 bg-slate-50 p-4">
+  <h3 className="mb-2 font-semibold">Acessar TrackUp</h3>
+  <p className="mb-3 text-xs text-slate-500">Crie seu acesso ou entre com seu e-mail e senha. O login do TrackUp é separado do Facebook.</p>
+  <form onSubmit={e=>{e.preventDefault(); void signInOrUp("login");}} className="space-y-3">
+    <input aria-label="E-mail TrackUp" type="email" required autoComplete="email" placeholder="Seu e-mail" value={email} onChange={e=>setEmail(e.target.value)} className={input+" w-full"}/>
+    <input aria-label="Senha TrackUp" type="password" required minLength={6} autoComplete="current-password" placeholder="Senha (mínimo 6 caracteres)" value={password} onChange={e=>setPassword(e.target.value)} className={input+" w-full"}/>
+    <div className="flex flex-wrap gap-2">
+      <button disabled={authBusy} type="submit" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{authBusy?"Aguarde...":"Entrar"}</button>
+      <button disabled={authBusy} type="button" onClick={()=>void signInOrUp("signup")} className={btn}>Criar conta</button>
+    </div>
+  </form>
+  {authMessage && <p role="status" className="mt-3 text-sm text-slate-700">{authMessage}</p>}
+</div> : <div className="mb-5 flex flex-wrap items-center gap-2 text-sm"><span className="rounded-md bg-green-50 px-3 py-2 text-green-800">Acesso TrackUp: {session.user.email}</span><button className={btn} onClick={()=>void supabase.auth.signOut()}>Sair</button></div>}
+<button disabled={!session || connectBusy} onClick={()=>void startMetaConnection()} className="rounded-md bg-blue-600 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{connectBusy?"Conectando...":"Conectar com Facebook"}</button>
+{oauthMessage && <p role="alert" className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{oauthMessage}</p>}
+<p className="mt-6 border-t pt-4 text-sm text-slate-500">As contas de anúncios serão exibidas após validação da autorização e integração da consulta à Marketing API. Nenhum resultado fictício é apresentado.</p></>:<><h2 className="mb-3 font-semibold">{integration}</h2><p className="text-sm text-slate-500">Reservado para uma próxima etapa, depois do login com Facebook e da consulta de campanhas.</p></>}</div></div>}
         {updated&&<p className="mt-5 text-xs text-slate-400">Interface atualizada às {updated}. Dados externos dependem da integração.</p>}
       </main>
     </div>
