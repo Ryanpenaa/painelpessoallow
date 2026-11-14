@@ -153,7 +153,7 @@ export default function TrackupDashboard({summary,accountId,accountName,enabledA
     </div>
   </div>;
   return <div className="space-y-4">
-    <section className="rounded-xl border border-[#dae3f2] bg-white p-3 sm:p-4">
+    <section id="trackup-metrics-customizer" className="scroll-mt-5 rounded-xl border border-[#dae3f2] bg-white p-3 sm:p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-semibold text-slate-800">Meta Ads</span><span className="rounded-full bg-green-50 px-2 py-1 text-xs font-medium text-green-700">{enabledAccountCount} conta(s) habilitada(s)</span><span className="text-xs text-slate-500">{accountName?"Visualizando: "+accountName:"Escolha uma conta no filtro acima"}</span></div>
         <div className="flex flex-wrap gap-2">
