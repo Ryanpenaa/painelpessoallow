@@ -142,7 +142,7 @@ export default function TrackupDashboard({summary,accountId,accountName,enabledA
     if(target)move(id,target);
   };
   const cardCls="min-w-0 rounded-xl border border-[#dae3f2] bg-white p-4 shadow-sm sm:p-5";
-  const widgetHeader=(id:string,chart:boolean)=> <div className="mb-3 flex items-center justify-between gap-2">
+  const widgetHeader=(id:string)=> <div className="mb-3 flex items-center justify-between gap-2">
     <div className="min-w-0 text-[11px] font-semibold uppercase tracking-wide text-[#667b9f]">{labelFor(id)}</div>
     <div className="flex shrink-0 items-center gap-1">
       {editing&&<><button type="button" aria-label={"Mover "+labelFor(id)+" para a esquerda"} className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={()=>shift(id,-1)}><MoveLeft size={14}/></button><button type="button" aria-label={"Mover "+labelFor(id)+" para a direita"} className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={()=>shift(id,1)}><MoveRight size={14}/></button></>}
@@ -187,7 +187,7 @@ export default function TrackupDashboard({summary,accountId,accountName,enabledA
           onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setHovered(old=>old===id?null:old);}}
           onDrop={e=>{e.preventDefault();move(e.dataTransfer.getData("text/plain")||dragFrom.current||"",id);dragFrom.current=null;}}
           className={cardCls+(chart?" sm:col-span-2 lg:col-span-2 2xl:col-span-3":"")+(hovered===id?" ring-2 ring-blue-400":"")}>
-          {widgetHeader(id,chart)}
+          {widgetHeader(id)}
           {metric?<><div className="text-2xl font-bold tabular-nums text-[#102142]">{hide?"••••":summary&&accountId?formatMetric(metric,metric.get(summary),currency):"—"}</div><div className="mt-2 text-[11px] leading-5 text-slate-400">{metric.origin==="meta"?"Meta Ads Insights · "+(metric.id==="purchases"||metric.id==="purchase_value"||metric.id==="checkouts"?"conversões atribuídas":"métricas da conta"):"Aguardando checkout"}</div></>:
            id==="funnel"?<ConversionFunnel summary={accountId?summary:null}/>:
            id==="product_pie"?<PurchasesPie title="Compras por produto" data={productSlices} note="Aguardando dados de produtos vendidos via Cakto, Vega, Appmax ou outro checkout. A Meta não identifica o produto de cada compra desta integração."/>:
