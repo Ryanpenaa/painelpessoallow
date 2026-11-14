@@ -29,6 +29,22 @@ function Home() {
   const [oauthMessage, setOauthMessage] = useState("");
   const [metaConnections, setMetaConnections] = useState<Array<{meta_user_id:string;name:string|null;expires_at:string|null}>>([]);
   const [adAccounts, setAdAccounts] = useState<Array<{id:string;name:string;account_status:number;currency:string}>>([]);
+  const [hiddenAccountIds,setHiddenAccountIds]=useState<string[]>([]);
+  const [visibilityLoaded,setVisibilityLoaded]=useState(false);
+  useEffect(()=>{
+    try{
+      const stored=JSON.parse(localStorage.getItem("trackup.meta.hidden-accounts.v1")||"[]");
+      if(Array.isArray(stored))setHiddenAccountIds(stored.filter((id):id is string=>typeof id==="string"&&/^act_\d+$/.test(id)));
+    }catch{}
+    setVisibilityLoaded(true);
+  },[]);
+  useEffect(()=>{
+    if(visibilityLoaded)localStorage.setItem("trackup.meta.hidden-accounts.v1",JSON.stringify(hiddenAccountIds));
+  },[visibilityLoaded,hiddenAccountIds]);
+  const visibleAccounts=adAccounts.filter(a=>!hiddenAccountIds.includes(a.id));
+  const setAccountEnabled=(id:string,enabled:boolean)=>setHiddenAccountIds(old=>enabled?old.filter(x=>x!==id):Array.from(new Set([...old,id])));
+  const enableAllAccounts=()=>setHiddenAccountIds([]);
+  const hideAllAccounts=()=>setHiddenAccountIds(old=>Array.from(new Set([...old,...adAccounts.map(a=>a.id)])));
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [summary, setSummary] = useState<{spend:number;clicks:number;impressions:number;cpc:number;ctr:number;cpm:number;reach:number;frequency:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}|null>(null);
@@ -60,7 +76,7 @@ function Home() {
   const selectionKey=(level:MetaLevel)=>selectedAccount+":"+level;
   const chosenIds=selectedEntities[selectionKey(currentLevel)]||[];
   const selectedAccountIds=selectedEntities["accounts"]||[];
-  const filteredAccounts=adAccounts.filter(a=>
+  const filteredAccounts=visibleAccounts.filter(a=>
     (status==="Qualquer"||(status==="Ativo"?a.account_status===1:a.account_status!==1)) &&
     a.name.toLowerCase().includes(query.toLowerCase()) &&
     (!showSelectedOnly||selectedAccountIds.includes(a.id))
@@ -78,6 +94,11 @@ function Home() {
     try{const saved=localStorage.getItem("trackup.meta.selection.v1");if(saved){const value=JSON.parse(saved);if(value&&typeof value==="object"&&!Array.isArray(value))setSelectedEntities(value);}}catch{}
   },[]);
   useEffect(()=>{try{localStorage.setItem("trackup.meta.selection.v1",JSON.stringify(selectedEntities));}catch{}},[selectedEntities]);
+  useEffect(()=>{
+    if(!visibilityLoaded)return;
+    setSelectedAccount(current=>visibleAccounts.some(a=>a.id===current)?current:(visibleAccounts[0]?.id||""));
+    if(!visibleAccounts.length){setSummary(null);setCampaigns([]);setEntityRows([]);}
+  },[visibilityLoaded,hiddenAccountIds,adAccounts]);
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
   const rangeDates = () => {
@@ -156,7 +177,7 @@ function Home() {
     else {setMetaConnections([]);setAdAccounts([]);setCampaigns([]);setSelectedAccount("");setOwnerProfile(null);setMetaTokenExpiresAt(null);}
   },[metaSession]);
   const loadCampaigns=async()=>{
-    if(!metaSession || !selectedAccount){setCampaigns([]);return;}
+    if(!metaSession || !selectedAccount || hiddenAccountIds.includes(selectedAccount)){setCampaigns([]);return;}
     if(campaignsLock.current || Date.now()<throttleUntil.current)return;
     campaignsLock.current=true;
     setCampaignBusy(true);
@@ -171,7 +192,7 @@ function Home() {
     }finally{setCampaignBusy(false);campaignsLock.current=false;}
   };
   const loadSummary=async()=>{
-    if(!metaSession || !selectedAccount || summaryLock.current || Date.now()<throttleUntil.current)return;
+    if(!metaSession || !selectedAccount || hiddenAccountIds.includes(selectedAccount) || summaryLock.current || Date.now()<throttleUntil.current)return;
     summaryLock.current=true;
     try{
       const range=rangeDates();
@@ -212,7 +233,7 @@ function Home() {
   },[autoRefresh,metaSession,selectedAccount,period,since,until]);
 
   const loadEntities=async()=>{
-    if(!metaSession||!selectedAccount||tab==="Contas"){setEntityRows([]);return;}
+    if(!metaSession||!selectedAccount||hiddenAccountIds.includes(selectedAccount)||tab==="Contas"){setEntityRows([]);return;}
     if(Date.now()<throttleUntil.current)return;
     const request=++entityRequest.current;
     setEntityBusy(true);setEntityError("");
@@ -328,7 +349,7 @@ function Home() {
       <main className="min-w-0 flex-1 p-4 md:p-7">
         <header className="mb-5 flex flex-wrap items-center gap-3"><button className={btn+" md:hidden"} onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={18}/></button><h1 className="mr-auto text-xl font-bold md:text-2xl">{page==="Painel"?"Dashboard Principal":page}</h1>{page==="Painel"&&<div className="flex flex-wrap gap-1">{periods.map(p=><button className={btn+(period===p?" border-blue-500 bg-blue-50 text-blue-700":"")} key={p} onClick={()=>setPeriod(p)}>{p}</button>)}</div>}</header>
         {page==="Painel"&&<div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
+          <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
   <span className="font-semibold text-slate-800">{metaSession?"Meta Ads conectada":"Meta Ads desconectada"}</span>
   {ownerProfile&&<span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-800">Perfil pessoal: {ownerProfile.email}</span>}
@@ -338,7 +359,7 @@ function Home() {
   {syncIssue&&<span role="alert" className="text-amber-700">{syncIssue}</span>}
   <span className="text-slate-500">Os dados podem ter atraso de processamento na Meta.</span>
 </div>
-<div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {adAccounts.length} conta(s) disponível(is). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
+<div className="rounded-md border border-[#cbd9fc] bg-[#eaf0ff] p-4 text-sm text-blue-700">{metaSession?adAccounts.length>0?<>Facebook conectado: {visibleAccounts.length} conta(s) visível(is) de {adAccounts.length} autorizada(s). {campaignBusy?"Atualizando campanhas...":campaignError||"Métricas de campanhas disponíveis conforme permissões da Meta."}</>:<>Facebook autorizado, mas nenhuma conta de anúncios foi retornada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Verificar integração</button>.</>:<>Nenhuma fonte de dados conectada. <button className="font-semibold underline" onClick={()=>setPage("Integrações")}>Configurar Facebook Ads</button>.</>}</div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(c=><div key={c} className="min-h-32 rounded-xl border border-[#dae3f2] bg-white p-5">
   <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[#667b9f]">{metricTitle(c)}</div>
   <div className="text-2xl font-bold">{hide?"••••":metricValue(c)}</div>
@@ -362,9 +383,9 @@ function Home() {
     </div>}
   </section>
   <section className="min-w-0 rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-6 lg:col-span-2">
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4"><h2 className="text-sm font-semibold">Resumo por conta</h2><span className="text-xs text-slate-500">{adAccounts.length} contas</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4"><h2 className="text-sm font-semibold">Resumo por conta</h2><span className="text-xs text-slate-500">{visibleAccounts.length} contas visíveis</span></div>
     <div className="mt-3 max-h-80 min-w-0 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
-      {adAccounts.length?adAccounts.map(a=><button key={a.id} onClick={()=>setSelectedAccount(a.id)} className={"flex w-full min-w-0 items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors "+(selectedAccount===a.id?"border-blue-400 bg-blue-50":"border-slate-200 hover:bg-slate-50")}>
+      {visibleAccounts.length?visibleAccounts.map(a=><button key={a.id} onClick={()=>setSelectedAccount(a.id)} className={"flex w-full min-w-0 items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors "+(selectedAccount===a.id?"border-blue-400 bg-blue-50":"border-slate-200 hover:bg-slate-50")}>
         <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold text-slate-800" title={a.name}>{a.name}</div><div className="truncate text-[11px] text-slate-500">{a.id} · {a.currency}</div></div>
         <span className={"shrink-0 rounded-full px-2 py-1 text-[10px] "+(a.account_status===1?"bg-green-100 text-green-800":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span>
       </button>):<div className="py-12 text-center text-sm text-slate-400">Nenhuma conta conectada.</div>}
@@ -378,7 +399,7 @@ function Home() {
             {["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>{setTab(t);setShowSelectedOnly(false);}} className={"whitespace-nowrap border-b-2 px-5 py-3 text-sm "+(tab===t?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500")}>{t}</button>)}
           </div>
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4">
-            <label className="flex flex-col gap-1 text-xs text-slate-500">Conta de anúncios<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Conta de anúncios<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
             <button className={btn} onClick={()=>{setTab("Contas");setShowSelectedOnly(false);}}>Selecionar contas ({selectedAccountIds.length})</button>
             <label className="flex flex-col gap-1 text-xs text-slate-500">Status<select value={status} onChange={e=>setStatus(e.target.value)} className={input}><option>Qualquer</option><option>Ativo</option><option>Pausado</option></select></label>
             <label className="flex flex-col gap-1 text-xs text-slate-500">Período<select value={period} onChange={e=>setPeriod(e.target.value)} className={input}>{periods.map(p=><option key={p}>{p}</option>)}</select></label>
@@ -452,6 +473,25 @@ function Home() {
 <div className="mt-6 border-t pt-4">
   <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Contas de anúncios conectadas</h3><button className={btn} disabled={!metaSession||loadingAccounts} onClick={()=>metaSession&&void loadMetaAccounts(metaSession)}>{loadingAccounts?"Consultando...":"Atualizar contas"}</button></div>
   {metaConnections.length>0 && <p className="mb-3 text-sm text-green-700">{metaConnections.length} perfil(is) Facebook autorizado(s): {metaConnections.map(c=>c.name||c.meta_user_id).join(", ")}</p>}
+  {adAccounts.length>0&&<section className="mb-5 rounded-lg border border-[#dce3f1] bg-[#f8faff] p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><h3 className="text-sm font-semibold">Escolher contas exibidas no TrackUp</h3><p className="mt-1 text-xs text-slate-500">{visibleAccounts.length} de {adAccounts.length} visíveis. Desativar aqui apenas oculta a conta no TrackUp; não pausa anúncios no Facebook.</p></div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={btn} onClick={enableAllAccounts} disabled={hiddenAccountIds.length===0}>Ativar todas</button>
+        <button type="button" className={btn} onClick={hideAllAccounts} disabled={visibleAccounts.length===0}>Desativar todas</button>
+      </div>
+    </div>
+    <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
+      {adAccounts.map(a=>{
+        const enabled=!hiddenAccountIds.includes(a.id);
+        return <label key={a.id} className={"flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg border p-3 "+(enabled?"border-blue-200 bg-white":"border-slate-200 bg-slate-100/70 opacity-75")}>
+          <div className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-800">{a.name}</span><span className="block truncate text-xs text-slate-500">{a.id} · {a.currency} · Situação na Meta: {a.account_status===1?"ativa":"status "+a.account_status}</span></div>
+          <div className="flex items-center gap-2"><span className={"text-xs font-semibold "+(enabled?"text-green-700":"text-slate-500")}>{enabled?"Exibir":"Oculta"}</span><input type="checkbox" role="switch" aria-label={"Exibir "+a.name+" no TrackUp"} checked={enabled} onChange={e=>setAccountEnabled(a.id,e.target.checked)} className="h-5 w-5 cursor-pointer accent-blue-600"/></div>
+        </label>;
+      })}
+    </div>
+    <p className="mt-3 text-xs text-slate-500">Escolhas salvas neste navegador. Contas ocultas não aparecem nos filtros, tabelas e resumo, mas continuam autorizadas no Facebook.</p>
+  </section>
   {adAccounts.length===0?<p className="text-sm text-slate-500">{loadingAccounts?"Buscando suas contas na Meta...":"Nenhuma conta de anúncios retornada. Conecte o Facebook ou verifique as permissões de acesso."}</p>:<div className="space-y-2">{adAccounts.map(a=><div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3"><div><strong className="block text-sm">{a.name}</strong><span className="text-xs text-slate-500">{a.id} · {a.currency}</span></div><span className={"rounded-full px-3 py-1 text-xs "+(a.account_status===1?"bg-green-50 text-green-700":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span></div>)}</div>}
   {accountWarning.map((warning,i)=><p key={i} className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
   <p className="mt-3 text-xs text-slate-500">A listagem é consultada diretamente na Marketing API. Gastos e campanhas são consultados pela API da Meta. Valores de compras e ROAS são atribuídos pelo Facebook quando disponíveis e não substituem vendas confirmadas pelo checkout.</p>
