@@ -7,8 +7,8 @@ const metaOauthEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1
 const allCards = ["Faturamento", "Lucro operacional", "Gasto em Ads", "CPA", "ARPU", "ROAS", "ROI", "CPC", "CTR", "CPM", "Vendas aprovadas", "Vendas pendentes", "Chargeback", "Margem", "Cliques", "Impressões", "Checkouts iniciados"];
 const allCols = ["Status", "Campanha", "Última atualização", "Orçamento", "Gasto", "Vendas Meta", "Vendas TrackUp", "Vendas pendentes", "Faturamento", "Lucro", "ROAS", "CPA", "ARPU", "Impressões", "Cliques", "CPC", "CTR"];
 const periods = ["Hoje", "Ontem", "7 dias", "15 dias", "30 dias", "Personalizado"];
-const defaults = allCards.slice(0, 6).concat(allCards.slice(10, 14));
-const defaultCols = allCols.slice(0, 7).concat(allCols.slice(8, 12), allCols.slice(13, 15));
+const defaults = ["Gasto em Ads","Faturamento","Vendas aprovadas","ROAS","CPA","ARPU","CPC","CTR","CPM","Cliques","Impressões","Checkouts iniciados"];
+const defaultCols = ["Status","Campanha","Orçamento","Gasto","Vendas Meta","Faturamento","ROAS","CPA","ARPU","Impressões","Cliques","CPC","CTR"];
 function Home() {
   const [page, setPage] = useState("Painel");
   const [period, setPeriod] = useState("Hoje");
