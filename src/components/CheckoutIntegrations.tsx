@@ -71,6 +71,7 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
   }catch(e){setError(e instanceof Error?e.message:"Não foi possível salvar a configuração do Pixel.");}
   finally{setBusy(false);}
  };
+ const adParams="?utm_source=facebook&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}";
  const installCode=productId?'<script async src="https://painelpessoallow.lovable.app/trackup-site.js?product='+encodeURIComponent(productId)+'"></script>':"";
  const createConnection=async()=>{
   if(!productId)return;
@@ -132,7 +133,13 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
    <p className="mb-3 text-xs leading-5 text-slate-600">Instale o código na página de vendas do produto selecionado. O TrackUp captura os parâmetros de anúncio e acrescenta um identificador ao link do checkout, para conectar a visita à compra recebida por webhook.</p>
    <textarea className="h-20 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs" readOnly value={installCode} placeholder="Selecione um produto para gerar o código"/>
    <button type="button" className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold" disabled={!installCode} onClick={()=>installCode&&navigator.clipboard.writeText(installCode)}><Copy size={14}/>Copiar código da página</button>
-   <p className="mt-3 text-xs text-slate-500">Para identificar a campanha e o anúncio internamente, inclua <code>campaign_id</code>, <code>adset_id</code> e <code>ad_id</code> na URL dos seus anúncios usando os parâmetros dinâmicos da Meta. O envio CAPI não força atribuição a uma campanha específica.</p>
+   <div className="mt-4 rounded-lg border border-slate-200 p-3">
+    <div className="mb-2 text-xs font-semibold text-slate-700">Parâmetros para colocar no URL do anúncio (Meta Ads)</div>
+    <textarea readOnly value={adParams} className="h-20 w-full rounded-lg bg-slate-50 p-2 font-mono text-[11px]" aria-label="Parâmetros Meta para atribuição"/>
+    <button type="button" className="mt-2 flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>navigator.clipboard.writeText(adParams)}><Copy size={14}/>Copiar parâmetros da campanha</button>
+    <p className="mt-2 text-[11px] text-slate-500">Acrescente esses parâmetros ao link da página de vendas. O TrackUp grava campanha, conjunto e anúncio e tenta associar à transação via identificador enviado ao checkout. A Meta faz sua própria atribuição usando fbp/fbc e outros identificadores; não é possível forçar uma campanha no evento CAPI.</p>
+   </div>
+   <p className="mt-3 text-xs text-amber-700">Evite duplicar o evento Purchase: se seu checkout já envia Purchase por Pixel/CAPI para esse mesmo Pixel, desative o envio paralelo ou configure deduplicação com o mesmo event_id antes de ativar esta integração. Siga também os requisitos de consentimento e privacidade aplicáveis.</p>
   </section>
   <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
    <h3 className="mb-1 font-semibold">Conexões configuradas</h3>
