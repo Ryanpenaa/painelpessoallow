@@ -43,6 +43,29 @@ function Home() {
   const [campaigns, setCampaigns] = useState<Array<{id:string;name:string;status:string;effective_status:string;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}>>([]);
   const [campaignBusy, setCampaignBusy] = useState(false);
   const [campaignError, setCampaignError] = useState("");
+  type MetaLevel="campaign"|"adset"|"ad";
+  type MetaRow={id:string;name:string;status:string;effective_status:string;campaign_id:string|null;adset_id:string|null;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null};
+  const [entityRows,setEntityRows]=useState<MetaRow[]>([]);
+  const [entityBusy,setEntityBusy]=useState(false);
+  const [entityError,setEntityError]=useState("");
+  const [entityPartial,setEntityPartial]=useState(false);
+  const [campaignFocus,setCampaignFocus]=useState("");
+  const [adsetFocus,setAdsetFocus]=useState("");
+  const [showSelectedOnly,setShowSelectedOnly]=useState(false);
+  const [selectedEntities,setSelectedEntities]=useState<Record<string,string[]>>({});
+  const entityInFlight=useRef(false);
+  const entityRequest=useRef(0);
+  const currentLevel:MetaLevel=tab==="Conjuntos"?"adset":tab==="Anúncios"?"ad":"campaign";
+  const selectionKey=(level:MetaLevel)=>selectedAccount+":"+level;
+  const chosenIds=selectedEntities[selectionKey(currentLevel)]||[];
+  const selectOne=(id:string,checked:boolean)=>{
+    const key=selectionKey(currentLevel);
+    setSelectedEntities(old=>({...old,[key]:checked?Array.from(new Set([...(old[key]||[]),id])):(old[key]||[]).filter(x=>x!==id)}));
+  };
+  useEffect(()=>{
+    try{const saved=localStorage.getItem("trackup.meta.selection.v1");if(saved){const value=JSON.parse(saved);if(value&&typeof value==="object"&&!Array.isArray(value))setSelectedEntities(value);}}catch{}
+  },[]);
+  useEffect(()=>{try{localStorage.setItem("trackup.meta.selection.v1",JSON.stringify(selectedEntities));}catch{}},[selectedEntities]);
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
   const rangeDates = () => {
@@ -174,6 +197,40 @@ function Home() {
     };
   },[autoRefresh,metaSession,selectedAccount,period,since,until]);
 
+  const loadEntities=async()=>{
+    if(!metaSession||!selectedAccount||tab==="Contas"){setEntityRows([]);return;}
+    if(entityInFlight.current || Date.now()<throttleUntil.current)return;
+    entityInFlight.current=true;
+    const request=++entityRequest.current;
+    setEntityBusy(true);setEntityError("");
+    const dates=rangeDates();
+    try{
+      const response=await api("entities",{level:currentLevel,account_id:selectedAccount,since:dates.since,until:dates.until},metaSession);
+      if(request===entityRequest.current){setEntityRows(response.items||[]);setEntityPartial(!!response.partial);}
+    }catch(error){
+      if(request===entityRequest.current){setEntityRows([]);setEntityError(error instanceof Error?error.message:"Erro ao carregar itens da Meta.");}
+    }finally{entityInFlight.current=false;setEntityBusy(false);}
+  };
+  useEffect(()=>{
+    entityRequest.current+=1;
+    setEntityRows([]);setCampaignFocus("");setAdsetFocus("");
+    if(selectedAccount && metaSession && tab!=="Contas"){
+      // Fetch after clearing the previous selection's rows.
+      void loadEntities();
+    }
+  },[selectedAccount,metaSession,tab,period,since,until]);
+  useEffect(()=>{
+    if(page!=="Campanhas"||!autoRefresh||!metaSession||!selectedAccount||tab==="Contas")return;
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)void loadEntities();},120000);
+    return ()=>window.clearInterval(timer);
+  },[page,autoRefresh,selectedAccount,metaSession,tab,period,since,until]);
+  const filteredEntities=entityRows.filter(item=>
+    (status==="Qualquer"||(status==="Ativo"?item.effective_status==="ACTIVE":item.effective_status.includes("PAUSED"))) &&
+    item.name.toLowerCase().includes(query.toLowerCase()) &&
+    (currentLevel==="campaign"||!campaignFocus||item.campaign_id===campaignFocus) &&
+    (currentLevel!=="ad"||!adsetFocus||item.adset_id===adsetFocus) &&
+    (!showSelectedOnly||chosenIds.includes(item.id))
+  );
   const sum=(key:"spend"|"clicks"|"impressions")=>summary?.[key]??0;
   const money=(value:number,currency="BRL")=>new Intl.NumberFormat("pt-BR",{style:"currency",currency}).format(value);
   const currency=adAccounts.find(a=>a.id===selectedAccount)?.currency||"BRL";
@@ -300,24 +357,59 @@ function Home() {
 </div>
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
-          <div className="flex overflow-auto border-b border-[#dce3f1]">{["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>setTab(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===tab?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div>
-          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4"><label className="flex flex-col gap-1 text-xs text-slate-500">Status<select value={status} onChange={e=>setStatus(e.target.value)} className={input}><option>Qualquer</option><option>Ativo</option><option>Pausado</option></select></label><label className="flex flex-col gap-1 text-xs text-slate-500">Período<select value={period} onChange={e=>setPeriod(e.target.value)} className={input}>{periods.map(p=><option key={p}>{p}</option>)}</select></label>{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input}/><input aria-label="Data final" type="date" className={input}/></>}<label className="flex flex-col gap-1 text-xs text-slate-500">Conta<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label className="flex flex-1 items-center gap-2 rounded-md border border-[#d9e1ef] bg-white px-3"><Search size={15}/><input className="min-w-28 flex-1 py-2 text-sm outline-none" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar por nome"/></label><button className={btn} onClick={()=>setEdit("cols")}>Colunas</button><button className={btn} onClick={()=>void loadCampaigns()} disabled={campaignBusy}>{campaignBusy?"Atualizando...":"Atualizar"}</button><button className={btn} disabled title="Aguardando dados reais">Exportar</button></div>
-          <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white"><table className="w-full min-w-max text-left text-xs"><thead className="border-b bg-[#fcfdff] text-slate-500"><tr><th className="p-4"><input type="checkbox" disabled aria-label="Selecionar tudo"/></th>{cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":c:c}</th>)}</tr></thead><tbody>{tab==="Contas"?adAccounts.map(a=><tr className="border-b" key={a.id}><td className="p-4">•</td>{cols.map(c=><td key={c} className="px-4 py-4">{c==="Campanha"?a.name:c==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):tab==="Campanhas"?campaigns.filter(c=>status==="Qualquer"||(status==="Ativo"?c.effective_status==="ACTIVE":c.effective_status!=="ACTIVE")).filter(c=>c.name.toLowerCase().includes(query.toLowerCase())).map(c=><tr className="border-b" key={c.id}><td className="p-4">•</td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?c.name:
-  column==="Status"?c.effective_status:
-  column==="Gasto"?money(c.spend,currency):
-  column==="Vendas Meta"?(c.purchases===null?"—":c.purchases.toLocaleString("pt-BR")):
-  column==="Vendas TrackUp"?"—":
-  column==="Faturamento"?(c.purchase_value===null?"—":money(c.purchase_value,currency)):
-  column==="ROAS"?(c.meta_roas===null?"—":c.meta_roas.toFixed(2)+"x"):
-  column==="CPA"?(c.meta_cpa===null?"—":money(c.meta_cpa,currency)):
-  column==="ARPU"?(c.meta_arpu===null?"—":money(c.meta_arpu,currency)):
-  column==="Impressões"?c.impressions.toLocaleString("pt-BR"):
-  column==="Cliques"?c.clicks.toLocaleString("pt-BR"):
-  column==="CPC"?money(c.cpc,currency):
-  column==="CTR"?c.ctr.toFixed(2)+"%":
-  column==="Orçamento"?c.daily_budget?money(Number(c.daily_budget)/100,currency)+" / dia":c.lifetime_budget?money(Number(c.lifetime_budget)/100,currency):"—":
-  "—"}</td>)}</tr>):null}
-  {(tab==="Contas"?adAccounts.length===0:tab==="Campanhas"?campaigns.length===0:true)&&<tr><td colSpan={cols.length+1} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta de anúncios retornada pela Meta.":tab==="Campanhas"?(campaignBusy?"Consultando campanhas...":campaignError||"Nenhuma campanha retornada para o período ou conta selecionada."):"Consulta de conjuntos e anúncios será adicionada depois."} {(!metaSession)&&<button className="ml-2 font-semibold text-blue-600 underline" onClick={()=>setPage("Integrações")}>Conectar Facebook</button>}</td></tr>}</tbody></table></div>
+          <div className="flex overflow-x-auto border-b border-[#dce3f1]">
+            {["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>{setTab(t);setShowSelectedOnly(false);}} className={"whitespace-nowrap border-b-2 px-5 py-3 text-sm "+(tab===t?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500")}>{t}</button>)}
+          </div>
+          <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Conta<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Status<select value={status} onChange={e=>setStatus(e.target.value)} className={input}><option>Qualquer</option><option>Ativo</option><option>Pausado</option></select></label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Período<select value={period} onChange={e=>setPeriod(e.target.value)} className={input}>{periods.map(p=><option key={p}>{p}</option>)}</select></label>
+            {period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}
+            {tab==="Conjuntos"&&<label className="flex flex-col gap-1 text-xs text-slate-500">Campanha<select className={input} value={campaignFocus} onChange={e=>setCampaignFocus(e.target.value)}><option value="">Todas as campanhas</option>{Array.from(new Map(entityRows.map(a=>[a.campaign_id,a])).entries()).filter(([id])=>!!id).map(([id])=><option key={id} value={id!}>{id}</option>)}</select></label>}
+            {tab==="Anúncios"&&<><label className="flex flex-col gap-1 text-xs text-slate-500">Campanha<select className={input} value={campaignFocus} onChange={e=>{setCampaignFocus(e.target.value);setAdsetFocus("");}}><option value="">Todas as campanhas</option>{Array.from(new Set(entityRows.map(a=>a.campaign_id).filter(Boolean))).map(id=><option key={id} value={id!}>{id}</option>)}</select></label><label className="flex flex-col gap-1 text-xs text-slate-500">Conjunto<select className={input} value={adsetFocus} onChange={e=>setAdsetFocus(e.target.value)}><option value="">Todos os conjuntos</option>{Array.from(new Set(entityRows.filter(a=>!campaignFocus||a.campaign_id===campaignFocus).map(a=>a.adset_id).filter(Boolean))).map(id=><option key={id} value={id!}>{id}</option>)}</select></label></>}
+            <label className="flex min-w-36 flex-1 items-center gap-2 rounded-md border border-[#d9e1ef] bg-white px-3"><Search size={15}/><input className="min-w-0 flex-1 py-2 text-sm outline-none" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar pelo nome"/></label>
+            <button className={btn} onClick={()=>setEdit("cols")}>Colunas</button>
+            <button className={btn} disabled={entityBusy} onClick={()=>tab==="Contas"?(metaSession&&void loadMetaAccounts(metaSession)):void loadEntities()}>{entityBusy?"Consultando...":"Atualizar"}</button>
+          </div>
+          {tab!=="Contas"&&<div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dae3f2] bg-white px-4 py-3 text-xs">
+            <div><strong>{filteredEntities.length}</strong> {tab.toLowerCase()} exibidos · <strong>{chosenIds.length}</strong> marcados para acompanhar</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2"><input type="checkbox" checked={showSelectedOnly} onChange={e=>setShowSelectedOnly(e.target.checked)}/> Mostrar somente selecionados</label>
+              <button onClick={()=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:[]}));}} className="font-medium text-blue-700 underline">Limpar seleção</button>
+            </div>
+          </div>}
+          {entityError&&tab!=="Contas"&&<p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{entityError}</p>}
+          {entityPartial&&tab!=="Contas"&&<p className="text-xs text-amber-700">A Meta tem mais itens do que o limite desta consulta; a lista pode estar incompleta.</p>}
+          <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white">
+            <table className="w-full min-w-max text-left text-xs">
+              <thead className="border-b bg-[#fcfdff] text-slate-500"><tr>
+                <th className="p-4">{tab!=="Contas"&&<input type="checkbox" aria-label="Selecionar itens exibidos" checked={filteredEntities.length>0&&filteredEntities.every(a=>chosenIds.includes(a.id))} onChange={e=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:e.target.checked?Array.from(new Set([...(old[key]||[]),...filteredEntities.map(a=>a.id)])):(old[key]||[]).filter(id=>!filteredEntities.some(a=>a.id===id))}));}}/>}</th>
+                {cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?(tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":"Campanha"):c==="Vendas Meta"?"Compras Meta":c==="Faturamento"?"Valor compras Meta":c}</th>)}
+                {tab!=="Contas"&&<th className="px-4 py-4">Detalhar</th>}
+              </tr></thead>
+              <tbody>
+                {tab==="Contas"?adAccounts.map(a=><tr key={a.id} className="border-b"><td className="p-4">•</td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<button className="font-semibold text-blue-700" onClick={()=>{setSelectedAccount(a.id);setTab("Campanhas");}}>{a.name}</button>:column==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):
+                  filteredEntities.map(a=><tr key={a.id} className={"border-b "+(chosenIds.includes(a.id)?"bg-blue-50/60":"")}>
+                    <td className="p-4"><input type="checkbox" aria-label={"Selecionar "+a.name} checked={chosenIds.includes(a.id)} onChange={e=>selectOne(a.id,e.target.checked)}/></td>
+                    {cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<span className="max-w-80 break-words font-semibold">{a.name}</span>:
+                      column==="Status"?a.effective_status:
+                      column==="Orçamento"?(a.daily_budget?money(Number(a.daily_budget)/100,currency)+" / dia":a.lifetime_budget?money(Number(a.lifetime_budget)/100,currency):"—"):
+                      column==="Gasto"?money(a.spend,currency):
+                      column==="Vendas Meta"?(a.purchases===null?"—":a.purchases.toLocaleString("pt-BR")):
+                      column==="Faturamento"?(a.purchase_value===null?"—":money(a.purchase_value,currency)):
+                      column==="ROAS"?(a.meta_roas===null?"—":a.meta_roas.toFixed(2)+"x"):
+                      column==="CPA"?(a.meta_cpa===null?"—":money(a.meta_cpa,currency)):
+                      column==="ARPU"?(a.meta_arpu===null?"—":money(a.meta_arpu,currency)):
+                      column==="Impressões"?a.impressions.toLocaleString("pt-BR"):
+                      column==="Cliques"?a.clicks.toLocaleString("pt-BR"):
+                      column==="CPC"?money(a.cpc,currency):
+                      column==="CTR"?a.ctr.toFixed(2)+"%":"—"}</td>)}
+                    <td className="px-4 py-4">{currentLevel==="campaign"?<button className="font-semibold text-blue-700 underline" onClick={()=>{setTab("Conjuntos");setCampaignFocus(a.id);}}>Ver conjuntos</button>:currentLevel==="adset"?<button className="font-semibold text-blue-700 underline" onClick={()=>{setTab("Anúncios");setCampaignFocus(a.campaign_id||"");setAdsetFocus(a.id);}}>Ver anúncios</button>:"—"}</td>
+                  </tr>)}
+                {(tab==="Contas"?adAccounts.length===0:filteredEntities.length===0)&&<tr><td colSpan={cols.length+(tab==="Contas"?1:2)} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta disponível":entityBusy?"Buscando dados na Meta...":entityError||"Nenhum item corresponde aos filtros atuais."}</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </div>}
         {page==="Integrações"&&<div className="space-y-5"><p className="text-sm text-slate-500">Conecte suas contas de anúncios e configure o rastreamento.</p><div className="flex gap-1 overflow-auto border-b border-[#dce3f1]">{["Facebook Ads","Pixel de Rastreio","UTMs","Webhook API"].map(t=><button key={t} onClick={()=>setIntegration(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===integration?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div><div className="max-w-4xl rounded-xl border border-[#dae3f2] bg-white p-6">{integration==="Facebook Ads"?<><h2 className="mb-3 flex items-center gap-2 font-semibold"><Facebook size={22} className="text-blue-600"/> Conectar com Facebook</h2><p className="mb-5 text-sm leading-6 text-slate-600">O login será realizado pelo Facebook Login for Business oficial. Com as permissões necessárias, o sistema poderá listar contas de anúncios, campanhas ativas e pausadas e controlar os status pela Marketing API.</p>
 <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
