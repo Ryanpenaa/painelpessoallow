@@ -3,7 +3,7 @@ import {Copy,Plus,RefreshCw,ShieldCheck,Link2,CheckCircle2,AlertTriangle} from "
 
 const endpoint="https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/trackup-checkouts";
 type Product={id:string;name:string;currency:string;active:boolean};
-type Connection={id:string;product_id:string;platform:string;external_product_id:string|null;webhook_url:string|null;enabled:boolean;last_event_at:string|null};
+type Connection={id:string;product_id:string;platform:string;external_product_id:string|null;webhook_url:string|null;enabled:boolean;has_provider_secret:boolean;last_event_at:string|null};
 type TrackedSale={id:string;product_name:string;platform:string;status:string;transaction_id:string;payment_method:string;amount:number;currency:string;campaign_id:string|null;utm_campaign:string|null;tracking_visit_code:string|null;meta_delivery:string;created_at:string};
 const platforms=[{id:"cakto",name:"Cakto"},{id:"hotmart",name:"Hotmart"},{id:"vega",name:"Vega Checkout"},{id:"other",name:"Outra plataforma"}];
 export default function CheckoutIntegrations({session}:{session:string|null}){
@@ -16,6 +16,7 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
  const [platform,setPlatform]=useState("cakto");
  const [externalId,setExternalId]=useState("");
  const [providerSecret,setProviderSecret]=useState("");
+ const [secretsByConnection,setSecretsByConnection]=useState<Record<string,string>>({});
  const [pixelId,setPixelId]=useState("");
  const [capiToken,setCapiToken]=useState("");
  const [testEventCode,setTestEventCode]=useState("");
@@ -79,8 +80,19 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
   try{
    await fetchApi("create_connection",{product_id:productId,platform,external_product_id:externalId.trim(),provider_secret:providerSecret.trim()});
    setExternalId("");setProviderSecret("");
-   await refresh();setFeedback("Webhook criado. Copie a URL e cadastre-a na plataforma de checkout.");
+   await refresh();setFeedback("URL exclusiva criada. Cadastre-a na plataforma e depois informe o Hottok na conexão correspondente.");
   }catch(e){setError(e instanceof Error?e.message:"Falha ao criar webhook.");}
+  finally{setBusy(false);}
+ };
+ const saveProviderSecret=async(c:Connection)=>{
+  const value=(secretsByConnection[c.id]||"").trim();
+  if(value.length<8)return;
+  setBusy(true);setError("");setFeedback("");
+  try{
+   await fetchApi("set_provider_secret",{id:c.id,provider_secret:value});
+   setSecretsByConnection(old=>({...old,[c.id]:""}));
+   await refresh();setFeedback("Hottok guardado. Agora a Hotmart pode enviar eventos autenticados ao TrackUp.");
+  }catch(e){setError(e instanceof Error?e.message:"Não foi possível guardar o Hottok.");}
   finally{setBusy(false);}
  };
  const toggle=async(c:Connection)=>{
@@ -112,10 +124,10 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
     <label className="text-xs text-slate-500">Produto cadastrado<select className={inputClass} value={productId} onChange={e=>setProductId(e.target.value)}><option value="">Selecione um produto</option>{products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)}</select></label>
     <label className="text-xs text-slate-500">Plataforma<select className={inputClass} value={platform} onChange={e=>{setPlatform(e.target.value);setProviderSecret("");}}>{platforms.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
     <label className="text-xs text-slate-500">ID do produto na plataforma (opcional)<input className={inputClass} value={externalId} onChange={e=>setExternalId(e.target.value)} placeholder="Identificador oficial do checkout"/></label>
-    <label className="text-xs text-slate-500">{platform==="hotmart"?"Hottok da Hotmart":platform==="cakto"?"Chave secreta do webhook Cakto":"Token adicional (opcional)"}<input className={inputClass} type="password" autoComplete="off" value={providerSecret} onChange={e=>setProviderSecret(e.target.value)} placeholder={platform==="hotmart"?"X-HOTMART-HOTTOK":platform==="cakto"?"Secret da configuração do webhook":"Opcional para esta plataforma"}/></label>
+    <label className="text-xs text-slate-500">{platform==="hotmart"?"Hottok da Hotmart":platform==="cakto"?"Chave secreta do webhook Cakto":"Token adicional (opcional)"}<input className={inputClass} type="password" autoComplete="off" value={providerSecret} onChange={e=>setProviderSecret(e.target.value)} placeholder={platform==="hotmart"?"Pode deixar vazio e informar depois":platform==="cakto"?"Pode deixar vazio e informar depois":"Opcional para esta plataforma"}/></label>
    </div>
-   <p className="mt-3 text-xs leading-5 text-slate-500">{platform==="cakto"?"Utilize a chave secreta do webhook criado na Cakto; o TrackUp valida a assinatura HMAC ou o segredo do payload legado.":platform==="hotmart"?"Utilize o Hottok de autenticação da sua conta Hotmart, enviado no cabeçalho X-HOTMART-HOTTOK.":platform==="vega"?"Vega: use a URL exclusiva como segredo de acesso; a documentação consultada não confirmou cabeçalho de assinatura para o webhook.":"Outra plataforma: o formato do evento precisará ser compatível ou ter um adaptador próprio."}</p>
-   <button disabled={!session||busy||!productId||((platform==="cakto"||platform==="hotmart")&&providerSecret.trim().length<8)} onClick={()=>void createConnection()} className="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><Link2 size={16}/>Gerar webhook exclusivo</button>
+   <p className="mt-3 text-xs leading-5 text-slate-500">{platform==="cakto"?"Você pode criar a URL primeiro e informar depois a chave secreta do webhook Cakto.":platform==="hotmart"?"Primeiro gere a URL sem Hottok, cadastre-a na Hotmart e depois volte para informar o Hottok na conexão criada.":platform==="vega"?"Vega: use a URL exclusiva como segredo de acesso; a documentação consultada não confirmou cabeçalho de assinatura para o webhook.":"Outra plataforma: o formato do evento precisará ser compatível ou ter um adaptador próprio."}</p>
+   <button disabled={!session||busy||!productId} onClick={()=>void createConnection()} className="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><Link2 size={16}/>Gerar webhook exclusivo</button>
   </section>
   <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
    <div className="mb-4 flex items-center gap-2"><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">3</span><h3 className="font-semibold">Pixel Meta + API de Conversões (CAPI)</h3></div>
@@ -151,6 +163,14 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
        <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={c.enabled} onChange={()=>void toggle(c)} disabled={busy} className="h-4 w-4 accent-blue-600"/>{c.enabled?"Ativo":"Desativado"}</label>
       </div>
       <div className="flex items-center gap-2"><input className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-[11px]" value={c.webhook_url||""} readOnly aria-label="URL exclusiva do webhook"/><button className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={()=>c.webhook_url&&navigator.clipboard.writeText(c.webhook_url)} disabled={!c.webhook_url}><Copy size={14}/>Copiar</button></div>
+      {(c.platform==="hotmart"||c.platform==="cakto")&&<div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-2 text-xs font-semibold text-slate-700">{c.platform==="hotmart"?"Autenticação Hotmart (Hottok)":"Segredo do webhook Cakto"} — {c.has_provider_secret?"Configurado":"Pendente"}</div>
+        <p className="mb-2 text-[11px] text-slate-500">{c.has_provider_secret?"Você pode substituir a chave salva se necessário.":"Cadastre a URL acima no checkout, obtenha a chave de autenticação e cole aqui para habilitar o processamento seguro."}</p>
+        <div className="flex flex-wrap gap-2">
+          <input type="password" autoComplete="off" value={secretsByConnection[c.id]||""} onChange={e=>setSecretsByConnection(old=>({...old,[c.id]:e.target.value}))} className="min-w-48 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" placeholder={c.platform==="hotmart"?"Cole o Hottok da Hotmart":"Cole o segredo da Cakto"}/>
+          <button type="button" disabled={busy||(secretsByConnection[c.id]||"").trim().length<8} onClick={()=>void saveProviderSecret(c)} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Guardar autenticação</button>
+        </div>
+      </div>}
     </div>)}
     {!connections.length&&<p className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Nenhum webhook configurado. Crie um produto e gere sua primeira conexão.</p>}
    </div>
