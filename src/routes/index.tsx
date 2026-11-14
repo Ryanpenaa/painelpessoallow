@@ -23,6 +23,8 @@ function Home() {
   const [mobile, setMobile] = useState(false);
   const [updated, setUpdated] = useState("");
   const [metaSession, setMetaSession] = useState<string | null>(null);
+  const [ownerProfile, setOwnerProfile] = useState<{email:string;name:string|null}|null>(null);
+  const [metaTokenExpiresAt, setMetaTokenExpiresAt] = useState<string | null>(null);
   const [connectBusy, setConnectBusy] = useState(false);
   const [oauthMessage, setOauthMessage] = useState("");
   const [metaConnections, setMetaConnections] = useState<Array<{meta_user_id:string;name:string|null;expires_at:string|null}>>([]);
@@ -106,6 +108,8 @@ function Home() {
     try{
       const status=await api("status",{},token);
       setMetaConnections(status.connections||[]);
+      if(status.profile)setOwnerProfile({email:status.profile.email,name:status.profile.name||null});
+      setMetaTokenExpiresAt(status.meta_token_expires_at||null);
       const result=await api("accounts",{},token);
       setAdAccounts(result.accounts||[]);
       setSelectedAccount(current=>(result.accounts||[]).some((a:{id:string})=>a.id===current)?current:(result.accounts||[])[0]?.id||"");
@@ -149,7 +153,7 @@ function Home() {
   },[]);
   useEffect(()=>{
     if(metaSession)void loadMetaAccounts(metaSession);
-    else {setMetaConnections([]);setAdAccounts([]);setCampaigns([]);setSelectedAccount("");}
+    else {setMetaConnections([]);setAdAccounts([]);setCampaigns([]);setSelectedAccount("");setOwnerProfile(null);setMetaTokenExpiresAt(null);}
   },[metaSession]);
   const loadCampaigns=async()=>{
     if(!metaSession || !selectedAccount){setCampaigns([]);return;}
@@ -298,6 +302,8 @@ function Home() {
     if(metaSession)await api("logout",{},metaSession).catch(()=>{});
     localStorage.removeItem("trackup.meta.session");
     setMetaSession(null);
+    setOwnerProfile(null);
+    setMetaTokenExpiresAt(null);
     setSummary(null);
     setOauthMessage("Facebook desconectado deste navegador.");
   };
@@ -325,6 +331,7 @@ function Home() {
           <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input}><option>Todos os produtos</option></select><select aria-label="Conta" className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>setEdit("cards")}><Pencil className="inline" size={15}/> Editar</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
   <span className="font-semibold text-slate-800">{metaSession?"Meta Ads conectada":"Meta Ads desconectada"}</span>
+  {ownerProfile&&<span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-800">Perfil pessoal: {ownerProfile.email}</span>}
   <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)}/> Atualização automática</label>
   <span>Indicadores: 60 s · campanhas: 120 s · contas: 5 min</span>
   <span>Última consulta: {lastMetaUpdate?new Date(lastMetaUpdate).toLocaleTimeString("pt-BR"):"aguardando"}</span>
@@ -431,8 +438,12 @@ function Home() {
         </div>}
         {page==="Integrações"&&<div className="space-y-5"><p className="text-sm text-slate-500">Conecte suas contas de anúncios e configure o rastreamento.</p><div className="flex gap-1 overflow-auto border-b border-[#dce3f1]">{["Facebook Ads","Pixel de Rastreio","UTMs","Webhook API"].map(t=><button key={t} onClick={()=>setIntegration(t)} className={`whitespace-nowrap border-b-2 px-5 py-3 text-sm ${t===integration?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500"}`}>{t}</button>)}</div><div className="max-w-4xl rounded-xl border border-[#dae3f2] bg-white p-6">{integration==="Facebook Ads"?<><h2 className="mb-3 flex items-center gap-2 font-semibold"><Facebook size={22} className="text-blue-600"/> Conectar com Facebook</h2><p className="mb-5 text-sm leading-6 text-slate-600">O login será realizado pelo Facebook Login for Business oficial. Com as permissões necessárias, o sistema poderá listar contas de anúncios, campanhas ativas e pausadas e controlar os status pela Marketing API.</p>
 <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-  Acesse diretamente com o Facebook. Não é necessário criar conta ou senha no TrackUp.
+  <strong>TrackUp pessoal — ryanpena108@gmail.com.</strong> Acesse com seu Facebook, sem cadastrar senha. A sessão permanece salva neste navegador; quando o token da Meta expirar ou for revogado, será necessário autorizar o Facebook novamente.
 </div>
+{metaSession&&ownerProfile&&<div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+  <strong>Conectado como {ownerProfile.name||"Facebook autorizado"}</strong> · {ownerProfile.email}
+  <span className="mt-1 block text-xs">Seu acesso fica salvo neste navegador. {metaTokenExpiresAt?"Token da Meta válido até "+new Date(metaTokenExpiresAt).toLocaleDateString("pt-BR"):"Consulte a validade da autorização na Meta."}</span>
+</div>}
 <div className="flex flex-wrap items-center gap-3">
   <button disabled={connectBusy} onClick={()=>void startMetaConnection()} className="flex items-center gap-2 rounded-md bg-blue-600 px-5 py-3 font-semibold text-white disabled:opacity-50"><Facebook size={18}/>{connectBusy?"Conectando...":metaSession?"Reconectar Facebook":"Conectar com Facebook"}</button>
   {metaSession && <button className={btn} onClick={()=>void disconnectMeta()}>Desconectar</button>}
