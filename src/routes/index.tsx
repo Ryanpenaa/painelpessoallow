@@ -491,7 +491,7 @@ function Home() {
       })}
     </div>
     <p className="mt-3 text-xs text-slate-500">Escolhas salvas neste navegador. Contas ocultas não aparecem nos filtros, tabelas e resumo, mas continuam autorizadas no Facebook.</p>
-  </section>
+  </section>}
   {adAccounts.length===0?<p className="text-sm text-slate-500">{loadingAccounts?"Buscando suas contas na Meta...":"Nenhuma conta de anúncios retornada. Conecte o Facebook ou verifique as permissões de acesso."}</p>:<div className="space-y-2">{adAccounts.map(a=><div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3"><div><strong className="block text-sm">{a.name}</strong><span className="text-xs text-slate-500">{a.id} · {a.currency}</span></div><span className={"rounded-full px-3 py-1 text-xs "+(a.account_status===1?"bg-green-50 text-green-700":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span></div>)}</div>}
   {accountWarning.map((warning,i)=><p key={i} className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
   <p className="mt-3 text-xs text-slate-500">A listagem é consultada diretamente na Marketing API. Gastos e campanhas são consultados pela API da Meta. Valores de compras e ROAS são atribuídos pelo Facebook quando disponíveis e não substituem vendas confirmadas pelo checkout.</p>
