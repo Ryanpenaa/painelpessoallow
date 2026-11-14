@@ -67,6 +67,9 @@ type Props={
   onManageAccounts:()=>void;
   productSlices?:Slice[];
   paymentSlices?:Slice[];
+  cloudLayout?:{order:string[];active:string[]}|null;
+  cloudReady?:boolean;
+  onSaveCloudLayout?:(layout:{order:string[];active:string[]})=>void;
 };
 const labelFor=(id:string)=>id==="funnel"?"Funil de conversão":id==="product_pie"?"Compras por produto":id==="payment_pie"?"Compras por pagamento":metrics.find(m=>m.id===id)?.title||id;
 function ConversionFunnel({summary}:{summary:MetaDashboardSummary|null}){
@@ -100,10 +103,12 @@ function PurchasesPie({title,data,note}:{title:string;data?:Slice[];note:string}
     <p className="max-w-sm text-center text-[11px] leading-relaxed text-slate-500">{note}</p>
   </div>;
 }
-export default function TrackupDashboard({summary,accountId,accountName,enabledAccountCount,currency,hide,onManageAccounts,productSlices,paymentSlices}:Props){
+export default function TrackupDashboard({summary,accountId,accountName,enabledAccountCount,currency,hide,onManageAccounts,productSlices,paymentSlices,cloudLayout,cloudReady,onSaveCloudLayout}:Props){
   const [order,setOrder]=useState<WidgetId[]>(catalog);
   const [active,setActive]=useState<WidgetId[]>(initial);
   const [loaded,setLoaded]=useState(false);
+  const [hydratedCloud,setHydratedCloud]=useState(false);
+  const cloudLayoutLast=useRef("");
   const [expanded,setExpanded]=useState(false);
   const [editing,setEditing]=useState(false);
   const [hovered,setHovered]=useState<string|null>(null);
@@ -128,6 +133,32 @@ export default function TrackupDashboard({summary,accountId,accountName,enabledA
     setLoaded(true);
   },[]);
   useEffect(()=>{if(loaded)localStorage.setItem(storage,JSON.stringify({order,active}));},[order,active,loaded]);
+  useEffect(()=>{
+    if(!cloudReady){setHydratedCloud(false);return;}
+    if(cloudLayout && Array.isArray(cloudLayout.order) && Array.isArray(cloudLayout.active)){
+      const validOrder=cloudLayout.order.filter(id=>catalog.includes(id));
+      const validActive=cloudLayout.active.filter(id=>catalog.includes(id));
+      const nextOrder=[...new Set([...validOrder,...catalog])];
+      const nextActive=[...new Set(validActive)];
+      setOrder(nextOrder);
+      setActive(nextActive);
+      cloudLayoutLast.current=JSON.stringify({order:nextOrder,active:nextActive});
+    }else{
+      cloudLayoutLast.current="";
+    }
+    setHydratedCloud(true);
+  },[cloudReady,cloudLayout]);
+  useEffect(()=>{
+    if(!loaded||!cloudReady||!hydratedCloud||!onSaveCloudLayout)return;
+    const layout={order,active};
+    const serialized=JSON.stringify(layout);
+    if(serialized===cloudLayoutLast.current)return;
+    const timer=window.setTimeout(()=>{
+      onSaveCloudLayout(layout);
+      cloudLayoutLast.current=serialized;
+    },900);
+    return ()=>window.clearTimeout(timer);
+  },[loaded,cloudReady,hydratedCloud,onSaveCloudLayout,order,active]);
   const enabled=(id:string)=>active.includes(id);
   const toggle=(id:string)=>setActive(old=>old.includes(id)?old.filter(x=>x!==id):[...old,id]);
   const move=(source:string,destination:string)=>{
