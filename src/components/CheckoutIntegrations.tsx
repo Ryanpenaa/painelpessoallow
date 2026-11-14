@@ -14,6 +14,11 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
  const [platform,setPlatform]=useState("cakto");
  const [externalId,setExternalId]=useState("");
  const [providerSecret,setProviderSecret]=useState("");
+ const [pixelId,setPixelId]=useState("");
+ const [capiToken,setCapiToken]=useState("");
+ const [testEventCode,setTestEventCode]=useState("");
+ const [pixelEnabled,setPixelEnabled]=useState(false);
+ const [pixelHasToken,setPixelHasToken]=useState(false);
  const [busy,setBusy]=useState(false);
  const [feedback,setFeedback]=useState("");
  const [error,setError]=useState("");
@@ -41,6 +46,28 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
   catch(e){setError(e instanceof Error?e.message:"Falha ao criar produto.");}
   finally{setBusy(false);}
  };
+ const loadPixel=async(id:string)=>{
+  if(!id){setPixelId("");setPixelEnabled(false);setPixelHasToken(false);return;}
+  try{
+   const response=await fetchApi("pixel_config",{product_id:id});
+   setPixelId(response.pixel?.pixel_id||"");
+   setPixelEnabled(!!response.pixel?.enabled);
+   setPixelHasToken(!!response.pixel?.has_token);
+   setTestEventCode(response.pixel?.test_event_code||"");
+   setCapiToken("");
+  }catch(e){setError(e instanceof Error?e.message:"Erro ao consultar Pixel.");}
+ };
+ useEffect(()=>{if(session&&productId)void loadPixel(productId);},[session,productId]);
+ const savePixel=async()=>{
+  setBusy(true);setError("");setFeedback("");
+  try{
+   await fetchApi("save_pixel",{product_id:productId,pixel_id:pixelId.trim(),access_token:capiToken.trim(),enabled:pixelEnabled,test_event_code:testEventCode.trim()});
+   setCapiToken("");setPixelHasToken(true);
+   setFeedback("Pixel e API de Conversões configurados. Faça uma compra de teste para validar a entrega.");
+  }catch(e){setError(e instanceof Error?e.message:"Não foi possível salvar a configuração do Pixel.");}
+  finally{setBusy(false);}
+ };
+ const installCode=productId?'<script async src="https://painelpessoallow.lovable.app/trackup-site.js?product='+encodeURIComponent(productId)+'"></script>':"";
  const createConnection=async()=>{
   if(!productId)return;
   setBusy(true);setError("");setFeedback("");
@@ -84,6 +111,24 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
    </div>
    <p className="mt-3 text-xs leading-5 text-slate-500">{platform==="cakto"?"Utilize a chave secreta do webhook criado na Cakto; o TrackUp valida a assinatura HMAC ou o segredo do payload legado.":platform==="hotmart"?"Utilize o Hottok de autenticação da sua conta Hotmart, enviado no cabeçalho X-HOTMART-HOTTOK.":platform==="vega"?"Vega: use a URL exclusiva como segredo de acesso; a documentação consultada não confirmou cabeçalho de assinatura para o webhook.":"Outra plataforma: o formato do evento precisará ser compatível ou ter um adaptador próprio."}</p>
    <button disabled={!session||busy||!productId||((platform==="cakto"||platform==="hotmart")&&providerSecret.trim().length<8)} onClick={()=>void createConnection()} className="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><Link2 size={16}/>Gerar webhook exclusivo</button>
+  </section>
+  <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
+   <div className="mb-4 flex items-center gap-2"><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">3</span><h3 className="font-semibold">Pixel Meta + API de Conversões (CAPI)</h3></div>
+   <p className="mb-4 text-xs leading-5 text-slate-600">Vincule o Pixel ao produto cadastrado. Os dados do anúncio são captados na página, e a compra aprovada recebida pelo webhook é enviada ao Pixel via servidor. A Meta atribui o evento automaticamente usando seus identificadores.</p>
+   <div className="grid gap-3 sm:grid-cols-2">
+    <label className="text-xs text-slate-500">Pixel ID (Gerenciador de Eventos)<input value={pixelId} onChange={e=>setPixelId(e.target.value)} className={inputClass} placeholder="123456789012345"/></label>
+    <label className="text-xs text-slate-500">Token da API de Conversões (não fica no site)<input type="password" autoComplete="off" value={capiToken} onChange={e=>setCapiToken(e.target.value)} className={inputClass} placeholder={pixelHasToken?"Token já salvo; deixe vazio para manter":"Cole o token CAPI gerado pela Meta"}/></label>
+    <label className="text-xs text-slate-500">Código de evento de teste (opcional)<input value={testEventCode} onChange={e=>setTestEventCode(e.target.value)} className={inputClass} placeholder="TEST12345"/></label>
+    <label className="flex items-center gap-2 self-end rounded-lg border border-slate-200 px-3 py-2 text-sm"><input type="checkbox" checked={pixelEnabled} onChange={e=>setPixelEnabled(e.target.checked)} className="h-4 w-4 accent-blue-600"/>Enviar compras aprovadas para a Meta</label>
+   </div>
+   <button onClick={()=>void savePixel()} disabled={!session||busy||!productId||!/^\d{8,30}$/.test(pixelId)||(pixelEnabled&&!capiToken&&!pixelHasToken)} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar Pixel e CAPI</button>
+  </section>
+  <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
+   <div className="mb-3 flex items-center gap-2"><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">4</span><h3 className="font-semibold">Código de rastreamento da página</h3></div>
+   <p className="mb-3 text-xs leading-5 text-slate-600">Instale o código na página de vendas do produto selecionado. O TrackUp captura os parâmetros de anúncio e acrescenta um identificador ao link do checkout, para conectar a visita à compra recebida por webhook.</p>
+   <textarea className="h-20 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs" readOnly value={installCode} placeholder="Selecione um produto para gerar o código"/>
+   <button type="button" className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold" disabled={!installCode} onClick={()=>installCode&&navigator.clipboard.writeText(installCode)}><Copy size={14}/>Copiar código da página</button>
+   <p className="mt-3 text-xs text-slate-500">Para identificar a campanha e o anúncio internamente, inclua <code>campaign_id</code>, <code>adset_id</code> e <code>ad_id</code> na URL dos seus anúncios usando os parâmetros dinâmicos da Meta. O envio CAPI não força atribuição a uma campanha específica.</p>
   </section>
   <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
    <h3 className="mb-1 font-semibold">Conexões configuradas</h3>
