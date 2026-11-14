@@ -34,6 +34,9 @@ function Home() {
   const [adAccounts, setAdAccounts] = useState<Array<{id:string;name:string;account_status:number;currency:string}>>([]);
   const [hiddenAccountIds,setHiddenAccountIds]=useState<string[]>([]);
   const [visibilityLoaded,setVisibilityLoaded]=useState(false);
+  const [cloudPreferencesReady,setCloudPreferencesReady]=useState(false);
+  const [cloudDashboardLayout,setCloudDashboardLayout]=useState<{order:string[];active:string[]}|null>(null);
+  const [preferencesError,setPreferencesError]=useState("");
   useEffect(()=>{
     try{
       const stored=JSON.parse(localStorage.getItem("trackup.meta.hidden-accounts.v1")||"[]");
@@ -187,7 +190,7 @@ function Home() {
     if(metaSession)void loadMetaAccounts(metaSession);
     else {setMetaConnections([]);setAdAccounts([]);setCampaigns([]);setSelectedAccount("");setOwnerProfile(null);setMetaTokenExpiresAt(null);}
   },[metaSession]);
-  const checkoutApi=async(action:string,other:Record<string,string>={})=>{
+  const checkoutApi=async(action:string,other:Record<string,unknown>={})=>{
     if(!metaSession)throw Error("Conecte o Facebook para visualizar vendas.");
     const response=await fetch(checkoutEndpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+metaSession},body:JSON.stringify({action,...other})});
     const result=await response.json();
@@ -212,6 +215,56 @@ function Home() {
     const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void load();},60000);
     return ()=>{active=false;window.clearInterval(timer);};
   },[metaSession,chosenProduct,period,since,until]);
+  useEffect(()=>{
+    if(!metaSession){setCloudPreferencesReady(false);setCloudDashboardLayout(null);return;}
+    let cancelled=false;
+    setCloudPreferencesReady(false);
+    const restore=async()=>{
+      try{
+        const response=await checkoutApi("get_preferences");
+        if(cancelled)return;
+        const pref=response.preferences||{};
+        if(Array.isArray(pref.hidden_accounts))setHiddenAccountIds(pref.hidden_accounts.filter((x:unknown):x is string=>typeof x==="string"&&/^act_\d+$/.test(x)));
+        if(pref.selected_entities && typeof pref.selected_entities==="object" && !Array.isArray(pref.selected_entities))setSelectedEntities(pref.selected_entities);
+        if(pref.dashboard_layout && Array.isArray(pref.dashboard_layout.order) && Array.isArray(pref.dashboard_layout.active))
+          setCloudDashboardLayout(pref.dashboard_layout);
+        else setCloudDashboardLayout(null);
+        setCloudPreferencesReady(true);
+        setPreferencesError("");
+      }catch(e){
+        if(cancelled)return;
+        // Keep local preferences when offline; never overwrite server settings after failed load.
+        setCloudPreferencesReady(false);
+        setPreferencesError("Preferências na nuvem indisponíveis. Suas integrações permanecem armazenadas no servidor.");
+      }
+    };
+    void restore();
+    return ()=>{cancelled=true;};
+  },[metaSession]);
+  useEffect(()=>{
+    if(!cloudPreferencesReady||!metaSession||!visibilityLoaded)return;
+    const timer=window.setTimeout(()=>{
+      void checkoutApi("save_preferences",{section:"hidden_accounts",value:hiddenAccountIds}).catch(()=>{
+        setPreferencesError("Não foi possível sincronizar a visibilidade das contas.");
+      });
+    },700);
+    return ()=>window.clearTimeout(timer);
+  },[cloudPreferencesReady,metaSession,hiddenAccountIds,visibilityLoaded]);
+  useEffect(()=>{
+    if(!cloudPreferencesReady||!metaSession)return;
+    const timer=window.setTimeout(()=>{
+      void checkoutApi("save_preferences",{section:"selected_entities",value:selectedEntities}).catch(()=>{
+        setPreferencesError("Não foi possível sincronizar a seleção de campanhas.");
+      });
+    },700);
+    return ()=>window.clearTimeout(timer);
+  },[cloudPreferencesReady,metaSession,selectedEntities]);
+  const saveDashboardLayout=(layout:{order:string[];active:string[]})=>{
+    if(!cloudPreferencesReady||!metaSession)return;
+    void checkoutApi("save_preferences",{section:"dashboard_layout",value:layout}).catch(()=>{
+      setPreferencesError("Não foi possível salvar o layout na nuvem.");
+    });
+  };
   const loadCampaigns=async()=>{
     if(!metaSession || !selectedAccount || !visibleAccounts.some(a=>a.id===selectedAccount)){setCampaigns([]);return;}
     if(campaignsLock.current || Date.now()<throttleUntil.current)return;
@@ -395,7 +448,8 @@ function Home() {
   {syncIssue&&<span role="alert" className="text-amber-700">{syncIssue}</span>}
   <span className="text-slate-500">Os dados podem ter atraso de processamento na Meta.</span>
 </div>
-<TrackupDashboard
+{preferencesError&&<p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{preferencesError}</p>}
+          <TrackupDashboard
   summary={visibleAccounts.some(a=>a.id===selectedAccount)?summary:null}
   accountId={visibleAccounts.some(a=>a.id===selectedAccount)?selectedAccount:""}
   accountName={visibleAccounts.find(a=>a.id===selectedAccount)?.name||""}
@@ -405,6 +459,9 @@ function Home() {
   onManageAccounts={()=>{setPage("Integrações");setIntegration("Facebook Ads");}}
   productSlices={checkoutStats?.product_pie||[]}
   paymentSlices={checkoutStats?.payment_pie||[]}
+  cloudLayout={cloudDashboardLayout}
+  cloudReady={cloudPreferencesReady}
+  onSaveCloudLayout={saveDashboardLayout}
 />
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
