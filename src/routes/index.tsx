@@ -57,6 +57,17 @@ function Home() {
   const currentLevel:MetaLevel=tab==="Conjuntos"?"adset":tab==="Anúncios"?"ad":"campaign";
   const selectionKey=(level:MetaLevel)=>selectedAccount+":"+level;
   const chosenIds=selectedEntities[selectionKey(currentLevel)]||[];
+  const selectedAccountIds=selectedEntities["accounts"]||[];
+  const filteredAccounts=adAccounts.filter(a=>
+    (status==="Qualquer"||(status==="Ativo"?a.account_status===1:a.account_status!==1)) &&
+    a.name.toLowerCase().includes(query.toLowerCase()) &&
+    (!showSelectedOnly||selectedAccountIds.includes(a.id))
+  );
+  const selectAccountForTracking=(id:string,checked:boolean)=>{
+    setSelectedEntities(old=>({...old,accounts:checked?Array.from(new Set([...(old.accounts||[]),id])):(old.accounts||[]).filter(x=>x!==id)}));
+    if(checked)setSelectedAccount(id);
+  };
+
   const selectOne=(id:string,checked:boolean)=>{
     const key=selectionKey(currentLevel);
     setSelectedEntities(old=>({...old,[key]:checked?Array.from(new Set([...(old[key]||[]),id])):(old[key]||[]).filter(x=>x!==id)}));
@@ -360,7 +371,8 @@ function Home() {
             {["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>{setTab(t);setShowSelectedOnly(false);}} className={"whitespace-nowrap border-b-2 px-5 py-3 text-sm "+(tab===t?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500")}>{t}</button>)}
           </div>
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4">
-            <label className="flex flex-col gap-1 text-xs text-slate-500">Conta<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Conta de anúncios<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{adAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+            <button className={btn} onClick={()=>{setTab("Contas");setShowSelectedOnly(false);}}>Selecionar contas ({selectedAccountIds.length})</button>
             <label className="flex flex-col gap-1 text-xs text-slate-500">Status<select value={status} onChange={e=>setStatus(e.target.value)} className={input}><option>Qualquer</option><option>Ativo</option><option>Pausado</option></select></label>
             <label className="flex flex-col gap-1 text-xs text-slate-500">Período<select value={period} onChange={e=>setPeriod(e.target.value)} className={input}>{periods.map(p=><option key={p}>{p}</option>)}</select></label>
             {period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}
@@ -370,6 +382,13 @@ function Home() {
             <button className={btn} onClick={()=>setEdit("cols")}>Colunas</button>
             <button className={btn} disabled={entityBusy} onClick={()=>tab==="Contas"?(metaSession&&void loadMetaAccounts(metaSession)):void loadEntities()}>{entityBusy?"Consultando...":"Atualizar"}</button>
           </div>
+          {tab==="Contas"&&<div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dae3f2] bg-white px-4 py-3 text-xs">
+            <div><strong>{selectedAccountIds.length}</strong> conta(s) de anúncios selecionada(s) · <strong>{filteredAccounts.length}</strong> exibida(s). Marque as contas que deseja acompanhar e clique no nome para abrir as campanhas.</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2"><input type="checkbox" checked={showSelectedOnly} onChange={e=>setShowSelectedOnly(e.target.checked)}/> Mostrar somente selecionadas</label>
+              <button className="font-medium text-blue-700 underline" onClick={()=>setSelectedEntities(old=>({...old,accounts:[]}))}>Limpar seleção de contas</button>
+            </div>
+          </div>}
           {tab!=="Contas"&&<div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dae3f2] bg-white px-4 py-3 text-xs">
             <div><strong>{filteredEntities.length}</strong> {tab.toLowerCase()} exibidos · <strong>{chosenIds.length}</strong> marcados para acompanhar</div>
             <div className="flex flex-wrap items-center gap-3">
@@ -382,12 +401,12 @@ function Home() {
           <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white">
             <table className="w-full min-w-max text-left text-xs">
               <thead className="border-b bg-[#fcfdff] text-slate-500"><tr>
-                <th className="p-4">{tab!=="Contas"&&<input type="checkbox" aria-label="Selecionar itens exibidos" checked={filteredEntities.length>0&&filteredEntities.every(a=>chosenIds.includes(a.id))} onChange={e=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:e.target.checked?Array.from(new Set([...(old[key]||[]),...filteredEntities.map(a=>a.id)])):(old[key]||[]).filter(id=>!filteredEntities.some(a=>a.id===id))}));}}/>}</th>
+                <th className="p-4">{tab==="Contas"?<input type="checkbox" aria-label="Selecionar todas as contas exibidas" checked={filteredAccounts.length>0&&filteredAccounts.every(a=>selectedAccountIds.includes(a.id))} onChange={e=>setSelectedEntities(old=>({...old,accounts:e.target.checked?Array.from(new Set([...(old.accounts||[]),...filteredAccounts.map(a=>a.id)])):(old.accounts||[]).filter(id=>!filteredAccounts.some(a=>a.id===id))}))}/>:<input type="checkbox" aria-label="Selecionar itens exibidos" checked={filteredEntities.length>0&&filteredEntities.every(a=>chosenIds.includes(a.id))} onChange={e=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:e.target.checked?Array.from(new Set([...(old[key]||[]),...filteredEntities.map(a=>a.id)])):(old[key]||[]).filter(id=>!filteredEntities.some(a=>a.id===id))}));}}/>}</th>
                 {cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?(tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":"Campanha"):c==="Vendas Meta"?"Compras Meta":c==="Faturamento"?"Valor compras Meta":c}</th>)}
                 {tab!=="Contas"&&<th className="px-4 py-4">Detalhar</th>}
               </tr></thead>
               <tbody>
-                {tab==="Contas"?adAccounts.map(a=><tr key={a.id} className="border-b"><td className="p-4">•</td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<button className="font-semibold text-blue-700" onClick={()=>{setSelectedAccount(a.id);setTab("Campanhas");}}>{a.name}</button>:column==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):
+                {tab==="Contas"?filteredAccounts.map(a=><tr key={a.id} className={"border-b "+(selectedAccountIds.includes(a.id)?"bg-blue-50/60":"")}><td className="p-4"><input type="checkbox" aria-label={"Selecionar conta "+a.name} checked={selectedAccountIds.includes(a.id)} onChange={e=>selectAccountForTracking(a.id,e.target.checked)}/></td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<button className="font-semibold text-blue-700" onClick={()=>{setSelectedAccount(a.id);setTab("Campanhas");}}>{a.name}</button>:column==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):
                   filteredEntities.map(a=><tr key={a.id} className={"border-b "+(chosenIds.includes(a.id)?"bg-blue-50/60":"")}>
                     <td className="p-4"><input type="checkbox" aria-label={"Selecionar "+a.name} checked={chosenIds.includes(a.id)} onChange={e=>selectOne(a.id,e.target.checked)}/></td>
                     {cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<span className="max-w-80 break-words font-semibold">{a.name}</span>:
@@ -405,7 +424,7 @@ function Home() {
                       column==="CTR"?a.ctr.toFixed(2)+"%":"—"}</td>)}
                     <td className="px-4 py-4">{currentLevel==="campaign"?<button className="font-semibold text-blue-700 underline" onClick={()=>{setTab("Conjuntos");setCampaignFocus(a.id);}}>Ver conjuntos</button>:currentLevel==="adset"?<button className="font-semibold text-blue-700 underline" onClick={()=>{setTab("Anúncios");setCampaignFocus(a.campaign_id||"");setAdsetFocus(a.id);}}>Ver anúncios</button>:"—"}</td>
                   </tr>)}
-                {(tab==="Contas"?adAccounts.length===0:filteredEntities.length===0)&&<tr><td colSpan={cols.length+(tab==="Contas"?1:2)} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta disponível":entityBusy?"Buscando dados na Meta...":entityError||"Nenhum item corresponde aos filtros atuais."}</td></tr>}
+                {(tab==="Contas"?filteredAccounts.length===0:filteredEntities.length===0)&&<tr><td colSpan={cols.length+(tab==="Contas"?1:2)} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta corresponde aos filtros ou à seleção atual.":entityBusy?"Buscando dados na Meta...":entityError||"Nenhum item corresponde aos filtros atuais."}</td></tr>}
               </tbody>
             </table>
           </div>
