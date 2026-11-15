@@ -10,6 +10,8 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
  const [products,setProducts]=useState<Product[]>([]);
  const [connections,setConnections]=useState<Connection[]>([]);
  const [recentSales,setRecentSales]=useState<TrackedSale[]>([]);
+ const [visitStats,setVisitStats]=useState<{visits:number;checkout_visits:number;note:string}|null>(null);
+ const [visitStatsBusy,setVisitStatsBusy]=useState(false);
  const [name,setName]=useState("");
  const [currency,setCurrency]=useState("BRL");
  const [productId,setProductId]=useState("");
@@ -60,6 +62,16 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
   }catch(e){setError(e instanceof Error?e.message:"Não foi possível carregar produtos.");}
  };
  useEffect(()=>{if(session)void refresh();else{setProducts([]);setConnections([]);}},[session]);
+ const loadVisitStats=async(id:string)=>{
+  if(!id||!session){setVisitStats(null);return;}
+  setVisitStats(null);setVisitStatsBusy(true);
+  try{
+    const result=await fetchApi("visit_stats",{product_id:id});
+    setVisitStats(result);
+  }catch{setVisitStats(null);}
+  finally{setVisitStatsBusy(false);}
+ };
+ useEffect(()=>{if(productId&&session)void loadVisitStats(productId);else setVisitStats(null);},[productId,session]);
  const createProduct=async()=>{
   if(!name.trim())return;
   setBusy(true);setError("");setFeedback("");
@@ -192,6 +204,14 @@ export default function CheckoutIntegrations({session}:{session:string|null}){
     <p className="mt-2 text-[11px] text-slate-500">Acrescente esses parâmetros ao link da página de vendas. O TrackUp grava campanha, conjunto e anúncio e tenta associar à transação via identificador enviado ao checkout. A Meta faz sua própria atribuição usando fbp/fbc e outros identificadores; não é possível forçar uma campanha no evento CAPI.</p>
    </div>
    <p className="mt-3 text-xs text-amber-700">Evite duplicar o evento Purchase: se seu checkout já envia Purchase por Pixel/CAPI para esse mesmo Pixel, desative o envio paralelo ou configure deduplicação com o mesmo event_id antes de ativar esta integração. Siga também os requisitos de consentimento e privacidade aplicáveis.</p>
+  </section>
+  <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
+   <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Visitas e cliques no checkout</h3><button type="button" className="rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-40" disabled={visitStatsBusy||!productId} onClick={()=>void loadVisitStats(productId)}>{visitStatsBusy?"Consultando…":"Atualizar métricas"}</button></div>
+   <div className="grid grid-cols-2 gap-3">
+    <div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">Visitas rastreadas</p><p className="mt-1 text-2xl font-bold text-slate-800">{visitStats?.visits??"—"}</p></div>
+    <div className="rounded-lg bg-blue-50 p-3"><p className="text-xs text-blue-700">Visitas com clique no checkout</p><p className="mt-1 text-2xl font-bold text-blue-900">{visitStats?.checkout_visits??"—"}</p></div>
+   </div>
+   <p className="mt-2 text-xs text-slate-500">Os cliques começaram a ser armazenados após a atualização do rastreador. Não representa necessariamente o InitiateCheckout da Meta. Eventos anteriores não podem ser recuperados retroativamente.</p>
   </section>
   <section className="rounded-xl border border-[#dae3f2] bg-white p-4 sm:p-5">
    <h3 className="mb-1 font-semibold">Conexões configuradas</h3>
