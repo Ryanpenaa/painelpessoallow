@@ -207,15 +207,24 @@ function Home() {
     }
     if(result==="error"){setOauthMessage("Autorização cancelada no Facebook.");return;}
     if(result==="connected" && returnedState){
-      const verifier=sessionStorage.getItem("trackup.meta.verifier");
-      const expected=sessionStorage.getItem("trackup.meta.state");
-      if(!verifier || expected!==returnedState){
-        setOauthMessage("A sessão de autorização não corresponde a este navegador. Tente novamente.");
+      const verifierInTab=sessionStorage.getItem("trackup.meta.verifier");
+      const stateInTab=sessionStorage.getItem("trackup.meta.state");
+      let fallback:{verifier:string;state:string;created:number}|null=null;
+      try{
+        const saved=localStorage.getItem("trackup.meta.pending-login");
+        if(saved)fallback=JSON.parse(saved);
+      }catch{}
+      const fallbackValid=fallback?.state===returnedState&&typeof fallback.verifier==="string"
+        &&typeof fallback.created==="number"&&Date.now()-fallback.created<600000;
+      const verifier=stateInTab===returnedState&&verifierInTab?verifierInTab:(fallbackValid?fallback!.verifier:null);
+      if(!verifier){
+        setOauthMessage("Não foi possível recuperar a autorização. Abra o TrackUp diretamente no Chrome ou Safari e inicie o login novamente no mesmo navegador.");
         return;
       }
       void api("finish",{state:returnedState,verifier}).then(data=>{
         sessionStorage.removeItem("trackup.meta.verifier");
         sessionStorage.removeItem("trackup.meta.state");
+        try{localStorage.removeItem("trackup.meta.pending-login");}catch{}
         localStorage.setItem("trackup.meta.session",data.session);
         setMetaSession(data.session);
         setOauthMessage("Facebook conectado! Carregando contas de anúncios...");
@@ -441,6 +450,12 @@ function Home() {
       if(!result.authorization_url?.startsWith("https://www.facebook.com/"))throw new Error("A Meta não retornou a URL de autorização.");
       sessionStorage.setItem("trackup.meta.verifier",verifier);
       sessionStorage.setItem("trackup.meta.state",result.state);
+      // Mobile browsers can open the return in another tab and lose sessionStorage.
+      // Store the short-lived verifier only on this origin; the backend still
+      // requires the matching state and verifier hash and consumes the flow once.
+      localStorage.setItem("trackup.meta.pending-login",JSON.stringify({
+        verifier,state:result.state,created:Date.now()
+      }));
       window.location.assign(result.authorization_url);
     }catch(e){
       setOauthMessage(e instanceof Error?e.message:"Não foi possível conectar ao Facebook.");
