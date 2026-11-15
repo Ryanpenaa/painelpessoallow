@@ -47,6 +47,7 @@ const catalog=[...metrics.map(m=>m.id),...widgets];
 const initial=["spend","purchase_value","purchases","meta_roas","meta_cpa","cpc","ctr","cpm","link_clicks","landing_page_views","checkouts","funnel","product_pie","payment_pie"];
 const storage="trackup.dashboard.layout.v3";
 const colors=["#2563eb","#06b6d4","#6366f1","#0ea5e9","#8b5cf6","#14b8a6","#f59e0b"];
+const stringList=(values:unknown[])=>values.filter((x):x is string=>typeof x==="string");
 const formatMoney=(v:number,currency:string)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency,maximumFractionDigits:2}).format(v);
 const formatCount=(v:number)=>new Intl.NumberFormat("pt-BR",{maximumFractionDigits:0}).format(v);
 function formatMetric(metric:Metric,value:number|null,currency:string){
@@ -79,7 +80,7 @@ function ConversionFunnel({summary}:{summary:MetaDashboardSummary|null}){
     {label:"Inícios de checkout",value:summary?.checkouts??null,shade:"#6366f1"},
     {label:"Compras atribuídas",value:summary?.purchases??null,shade:"#0ea5e9"}
   ];
-  const first=steps[0].value;
+  const first=steps[0]?.value??null;
   return <div className="space-y-3 py-3">
     {steps.map((step,i)=>{
       const percent=first!==null&&first>0&&step.value!==null?100*step.value/first:null;
@@ -117,16 +118,16 @@ export default function TrackupDashboard({summary,accountId,accountName,enabledA
     try{
       const json=JSON.parse(localStorage.getItem(storage)||"null");
       if(json&&Array.isArray(json.order)&&Array.isArray(json.active)){
-        const validOrder=json.order.filter((id:unknown):id is string=>typeof id==="string"&&catalog.includes(id));
-        const validActive=json.active.filter((id:unknown):id is string=>typeof id==="string"&&catalog.includes(id));
-        setOrder([...new Set([...validOrder,...catalog])]);
-        setActive([...new Set(validActive)]);
+        const validOrder:string[]=json.order.filter((id:unknown):id is string=>typeof id==="string"&&catalog.includes(id));
+        const validActive:string[]=json.active.filter((id:unknown):id is string=>typeof id==="string"&&catalog.includes(id));
+        setOrder(Array.from(new Set([...validOrder,...catalog])));
+        setActive(Array.from(new Set(validActive)));
       }else{
         const prior=JSON.parse(localStorage.getItem("trackup.cards")||"null");
         if(Array.isArray(prior)){
           const map:Record<string,string>={"Gasto em Ads":"spend","Faturamento":"purchase_value","Vendas aprovadas":"purchases","ROAS":"meta_roas","CPA":"meta_cpa","ARPU":"meta_arpu","CPC":"cpc","CTR":"ctr","CPM":"cpm","Cliques":"clicks","Impressões":"impressions","Checkouts iniciados":"checkouts"};
-          const prev=prior.map((x:string)=>map[x]).filter(Boolean);
-          setActive([...new Set([...prev,...widgets,"link_clicks","landing_page_views"])]);
+          const prev=stringList(prior.map((x:string)=>map[x]));
+          setActive(Array.from(new Set([...prev,...widgets,"link_clicks","landing_page_views"])));
         }
       }
     }catch{}
@@ -221,8 +222,8 @@ export default function TrackupDashboard({summary,accountId,accountName,enabledA
           {widgetHeader(id)}
           {metric?<><div className="text-2xl font-bold tabular-nums text-[#102142]">{hide?"••••":summary&&accountId?formatMetric(metric,metric.get(summary),currency):"—"}</div><div className="mt-2 text-[11px] leading-5 text-slate-400">{metric.origin==="meta"?"Meta Ads Insights · "+(metric.id==="purchases"||metric.id==="purchase_value"||metric.id==="checkouts"?"conversões atribuídas":"métricas da conta"):"Aguardando checkout"}</div></>:
            id==="funnel"?<ConversionFunnel summary={accountId?summary:null}/>:
-           id==="product_pie"?<PurchasesPie title="Compras por produto" data={productSlices} note="Aguardando dados de produtos vendidos via Cakto, Vega, Appmax ou outro checkout. A Meta não identifica o produto de cada compra desta integração."/>:
-           <PurchasesPie title="Cartão, Pix e outros pagamentos" data={paymentSlices} note="Aguardando dados da forma de pagamento via webhook do checkout. A Meta Ads não informa se uma compra foi Pix ou cartão."/>}
+           id==="product_pie"?<PurchasesPie title="Compras por produto" data={productSlices??[]} note="Aguardando dados de produtos vendidos via Cakto, Vega, Appmax ou outro checkout. A Meta não identifica o produto de cada compra desta integração."/>:
+           <PurchasesPie title="Cartão, Pix e outros pagamentos" data={paymentSlices??[]} note="Aguardando dados da forma de pagamento via webhook do checkout. A Meta Ads não informa se uma compra foi Pix ou cartão."/>}
         </section>;
       })}
     </div>

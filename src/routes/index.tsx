@@ -110,7 +110,7 @@ function Home() {
     (!showSelectedOnly||selectedAccountIds.includes(a.id))
   );
   const selectAccountForTracking=(id:string,checked:boolean)=>{
-    setSelectedEntities(old=>({...old,accounts:checked?Array.from(new Set([...(old.accounts||[]),id])):(old.accounts||[]).filter(x=>x!==id)}));
+    setSelectedEntities(old=>({...old,accounts:checked?Array.from(new Set([...(old["accounts"]||[]),id])):(old["accounts"]||[]).filter(x=>x!==id)}));
     if(checked)setSelectedAccount(id);
   };
 
@@ -553,7 +553,7 @@ function Home() {
           <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white">
             <table className="w-full min-w-max text-left text-xs">
               <thead className="border-b bg-[#fcfdff] text-slate-500"><tr>
-                <th className="p-4">{tab==="Contas"?<input type="checkbox" aria-label="Selecionar todas as contas exibidas" checked={filteredAccounts.length>0&&filteredAccounts.every(a=>selectedAccountIds.includes(a.id))} onChange={e=>setSelectedEntities(old=>({...old,accounts:e.target.checked?Array.from(new Set([...(old.accounts||[]),...filteredAccounts.map(a=>a.id)])):(old.accounts||[]).filter(id=>!filteredAccounts.some(a=>a.id===id))}))}/>:<input type="checkbox" aria-label="Selecionar itens exibidos" checked={filteredEntities.length>0&&filteredEntities.every(a=>chosenIds.includes(a.id))} onChange={e=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:e.target.checked?Array.from(new Set([...(old[key]||[]),...filteredEntities.map(a=>a.id)])):(old[key]||[]).filter(id=>!filteredEntities.some(a=>a.id===id))}));}}/>}</th>
+                <th className="p-4">{tab==="Contas"?<input type="checkbox" aria-label="Selecionar todas as contas exibidas" checked={filteredAccounts.length>0&&filteredAccounts.every(a=>selectedAccountIds.includes(a.id))} onChange={e=>setSelectedEntities(old=>({...old,accounts:e.target.checked?Array.from(new Set([...(old["accounts"]||[]),...filteredAccounts.map(a=>a.id)])):(old["accounts"]||[]).filter(id=>!filteredAccounts.some(a=>a.id===id))}))}/>:<input type="checkbox" aria-label="Selecionar itens exibidos" checked={filteredEntities.length>0&&filteredEntities.every(a=>chosenIds.includes(a.id))} onChange={e=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:e.target.checked?Array.from(new Set([...(old[key]||[]),...filteredEntities.map(a=>a.id)])):(old[key]||[]).filter(id=>!filteredEntities.some(a=>a.id===id))}));}}/>}</th>
                 {cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?(tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":"Campanha"):c==="Vendas Meta"?"Compras Meta":c==="Faturamento"?"Valor compras Meta":c}</th>)}
                 {tab!=="Contas"&&<th className="px-4 py-4">Detalhar</th>}
               </tr></thead>
