@@ -47,6 +47,11 @@ function Home() {
   useEffect(()=>{
     if(visibilityLoaded)localStorage.setItem("trackup.meta.hidden-accounts.v1",JSON.stringify(hiddenAccountIds));
   },[visibilityLoaded,hiddenAccountIds]);
+  const [accountFilter,setAccountFilter]=useState<"all"|"active"|"campaigns">("all");
+  const [campaignActivity,setCampaignActivity]=useState<Record<string,boolean|null>>({});
+  const [activityBusy,setActivityBusy]=useState(false);
+  const [activityError,setActivityError]=useState("");
+  const [activityCheckedAt,setActivityCheckedAt]=useState("");
   const visibleAccounts=adAccounts.filter(a=>visibilityLoaded&&!hiddenAccountIds.includes(a.id));
   const setAccountEnabled=(id:string,enabled:boolean)=>{
     setHiddenAccountIds(old=>enabled?old.filter(x=>x!==id):Array.from(new Set([...old,id])));
@@ -67,11 +72,6 @@ function Home() {
 
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
-  const [accountFilter,setAccountFilter]=useState<"all"|"active"|"campaigns">("all");
-  const [campaignActivity,setCampaignActivity]=useState<Record<string,boolean|null>>({});
-  const [activityBusy,setActivityBusy]=useState(false);
-  const [activityError,setActivityError]=useState("");
-  const [activityCheckedAt,setActivityCheckedAt]=useState("");
   const [summary, setSummary] = useState<MetaDashboardSummary|null>(null);
   const [lastMetaUpdate, setLastMetaUpdate] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
