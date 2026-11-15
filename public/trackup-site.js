@@ -37,6 +37,31 @@
   tracked.campaign_id=params.get("campaign_id")||params.get("utm_id")||"";
   tracked.adset_id=params.get("adset_id")||"";
   tracked.ad_id=params.get("ad_id")||"";
+  // A genuine checkout-link click is recorded by TrackUp and sent to the
+  // product's Meta Pixel as InitiateCheckout. Never use a global fbq("track")
+  // because a sales page may have other Pixels installed.
+  var configuredPixelId="";
+  var pixelReady=false;
+  var pendingCheckoutIC=false;
+  var icStorageKey="trackup.ic."+product+"."+session.code;
+  var icSent=false;
+  try{icSent=sessionStorage.getItem(icStorageKey)==="1";}catch(e){}
+  function fireInitiateCheckout(){
+    if(icSent)return;
+    if(!pixelReady||!configuredPixelId){
+      pendingCheckoutIC=true;
+      return;
+    }
+    if(typeof window.fbq!=="function")return;
+    try{
+      window.fbq("trackSingle",configuredPixelId,"InitiateCheckout",{
+        content_ids:[product],content_type:"product"
+      });
+      icSent=true;
+      pendingCheckoutIC=false;
+      try{sessionStorage.setItem(icStorageKey,"1");}catch(e){}
+    }catch(e){pendingCheckoutIC=true;}
+  }
   function report(event){
     var body={event:event,visit_code:session.code,landing_url:location.origin+location.pathname,
       fbp:cookie("_fbp"),fbc:cookie("_fbc")||fbc,fbclid:fbclid,
@@ -81,19 +106,23 @@
     var a=e.target&&e.target.closest&&e.target.closest("a[href]");
     if(!a)return;
     tagCheckout(a);
-    if(a.dataset.trackupCheckout==="1")report("checkout_click");
+    if(a.dataset.trackupCheckout==="1" && !e.defaultPrevented){
+      report("checkout_click");
+      fireInitiateCheckout();
+    }
   },true);
   if("MutationObserver"in window){
     var observer=new MutationObserver(function(){scan();});
     observer.observe(document.documentElement,{childList:true,subtree:true});
   }
   report("page_view");
-  // Associate this product with exactly the Pixel configured server-side.
-  // If a pixel already exists on the site, don't run global fbq('track'):
-  // global tracking would send this product's event to unrelated Pixels.
+  // Associate the product with its configured Meta Pixel, then flush any IC
+  // click that happened before the asynchronous Pixel configuration loaded.
+  // No Facebook Purchase is sent by this browser-side checkout click.
   fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
-    if(!cfg||!cfg.pixel_id||!/^\d{8,30}$/.test(cfg.pixel_id))return;
+    if(!cfg||!cfg.pixel_id||!/^\\d{8,30}$/.test(cfg.pixel_id))return;
     var id=String(cfg.pixel_id);
+    configuredPixelId=id;
     var hasFbq=typeof window.fbq==="function";
     if(!hasFbq){
       !function(f,b,e,v,n,t,s){
@@ -103,24 +132,30 @@
         t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);
       }(window,document,"script","https://connect.facebook.net/en_US/fbevents.js");
     }
-    var pixels=[];
+    var pixelIds=[];
+    var stateAvailable=false;
     try{
-      if(typeof window.fbq.getState==="function"){
+      if(typeof window.fbq==="function"&&typeof window.fbq.getState==="function"){
         var state=window.fbq.getState();
-        pixels=Array.isArray(state&&state.pixels)?state.pixels.map(function(p){return String(p.id);}):[];
+        if(state&&Array.isArray(state.pixels)){
+          stateAvailable=true;
+          pixelIds=state.pixels.map(function(p){return String(p.id);});
+        }
       }
     }catch(e){}
-    // Keep one init per Pixel per page load for this script.
     var initialized=window.__trackupPixelIds||(window.__trackupPixelIds={});
-    var exists=pixels.indexOf(id)!==-1||initialized[id]===true;
-    if(exists)return; // Existing pixel already owns its PageView; don't double-count it.
-    // When a Pixel exists but its state cannot be inspected, don't risk
-    // initializing an unknown duplicate. CAPI still works server-side.
-    if(hasFbq&&typeof window.fbq.getState!=="function")return;
-    initialized[id]=true;
-    window.fbq("init",id);
-    window.fbq("trackSingle",id,"PageView");
-    window.fbq("trackSingle",id,"ViewContent",{content_ids:[product],content_type:"product"});
+    var exists=pixelIds.indexOf(id)!==-1||initialized[id]===true;
+    if(!exists){
+      // Do not assume that an unknown existing fbq is safe to reinitialize.
+      // Its current initialization cannot be verified.
+      if(hasFbq&&!stateAvailable)return;
+      initialized[id]=true;
+      window.fbq("init",id);
+      window.fbq("trackSingle",id,"PageView");
+      window.fbq("trackSingle",id,"ViewContent",{content_ids:[product],content_type:"product"});
+    }
+    pixelReady=true;
+    if(pendingCheckoutIC)fireInitiateCheckout();
     setTimeout(function(){report("page_view");},1800);
   }).catch(function(){});
 })();
