@@ -120,7 +120,7 @@
   // click that happened before the asynchronous Pixel configuration loaded.
   // No Facebook Purchase is sent by this browser-side checkout click.
   fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
-    if(!cfg||!cfg.pixel_id||!/^\\d{8,30}$/.test(cfg.pixel_id))return;
+    if(!cfg||!cfg.pixel_id||!/^\d{8,30}$/.test(cfg.pixel_id))return;
     var id=String(cfg.pixel_id);
     configuredPixelId=id;
     var hasFbq=typeof window.fbq==="function";
