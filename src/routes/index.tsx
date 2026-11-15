@@ -56,8 +56,22 @@ function Home() {
   };
   const enableAllAccounts=()=>setHiddenAccountIds([]);
   const hideAllAccounts=()=>setHiddenAccountIds(old=>Array.from(new Set([...old,...adAccounts.map(a=>a.id)])));
+  const accountMatchesFilter=(a:{id:string;account_status:number})=>
+    accountFilter==="all"||(accountFilter==="active"?a.account_status===1:(a.account_status===1&&campaignActivity[a.id]===true));
+  const matchingAccounts=adAccounts.filter(accountMatchesFilter);
+  const selectOnlyMatchingAccounts=()=>{
+    if(accountFilter==="campaigns"&&!activityCheckedAt)return;
+    const allowed=new Set(matchingAccounts.map(a=>a.id));
+    setHiddenAccountIds(adAccounts.filter(a=>!allowed.has(a.id)).map(a=>a.id));
+  };
+
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [accountFilter,setAccountFilter]=useState<"all"|"active"|"campaigns">("all");
+  const [campaignActivity,setCampaignActivity]=useState<Record<string,boolean|null>>({});
+  const [activityBusy,setActivityBusy]=useState(false);
+  const [activityError,setActivityError]=useState("");
+  const [activityCheckedAt,setActivityCheckedAt]=useState("");
   const [summary, setSummary] = useState<MetaDashboardSummary|null>(null);
   const [lastMetaUpdate, setLastMetaUpdate] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -136,6 +150,30 @@ function Home() {
     if(!response.ok)throw new Error(result.error||"Não foi possível comunicar com a Meta.");
     return result;
   };
+  const checkActiveCampaigns=async()=>{
+    if(!metaSession||activityBusy)return;
+    setActivityBusy(true);setActivityError("");setActivityCheckedAt("");
+    setCampaignActivity({});
+    try{
+      const active=adAccounts.filter(a=>a.account_status===1);
+      const batches:typeof active[]=[];
+      for(let i=0;i<active.length;i+=80)batches.push(active.slice(i,i+80));
+      const aggregate:Record<string,boolean|null>={};
+      let failed=0;
+      for(const batch of batches){
+        const result=await api("account_campaign_activity",{account_ids:batch.map(a=>a.id)},metaSession);
+        for(const item of result.items||[]){
+          aggregate[item.id]=typeof item.has_active_campaign==="boolean"?item.has_active_campaign:null;
+          if(aggregate[item.id]===null)failed++;
+        }
+      }
+      setCampaignActivity(aggregate);
+      setActivityCheckedAt(new Date().toLocaleString("pt-BR"));
+      if(failed)setActivityError(failed+" conta(s) não puderam ser verificadas; não serão selecionadas automaticamente.");
+    }catch(e){
+      setActivityError(e instanceof Error?e.message:"Não foi possível verificar campanhas na Meta.");
+    }finally{setActivityBusy(false);}
+  };
   const loadMetaAccounts=async (token:string) => {
     if(accountsLock.current)return;
     accountsLock.current=true;
@@ -147,6 +185,7 @@ function Home() {
       setMetaTokenExpiresAt(status.meta_token_expires_at||null);
       const result=await api("accounts",{},token);
       setAdAccounts(result.accounts||[]);
+      setCampaignActivity({});setActivityCheckedAt("");setActivityError("");
       // The visible accounts effect selects an enabled account, never a hidden one.
       setAccountWarning(result.warnings||[]);
     }catch(e){
@@ -545,22 +584,39 @@ function Home() {
   {metaConnections.length>0 && <p className="mb-3 text-sm text-green-700">{metaConnections.length} perfil(is) Facebook autorizado(s): {metaConnections.map(c=>c.name||c.meta_user_id).join(", ")}</p>}
   {adAccounts.length>0&&<section className="mb-5 rounded-lg border border-[#dce3f1] bg-[#f8faff] p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h3 className="text-sm font-semibold">Escolher contas exibidas no TrackUp</h3><p className="mt-1 text-xs text-slate-500">{visibleAccounts.length} de {adAccounts.length} visíveis. Desativar aqui apenas oculta a conta no TrackUp; não pausa anúncios no Facebook.</p></div>
+      <div><h3 className="text-sm font-semibold">Escolher contas exibidas no TrackUp</h3><p className="mt-1 text-xs text-slate-500">{visibleAccounts.length} de {adAccounts.length} visíveis. Ocultar aqui não pausa campanhas nem altera sua conta na Meta.</p></div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className={btn} onClick={enableAllAccounts} disabled={hiddenAccountIds.length===0}>Ativar todas</button>
-        <button type="button" className={btn} onClick={hideAllAccounts} disabled={visibleAccounts.length===0}>Desativar todas</button>
+        <button type="button" className={btn} onClick={enableAllAccounts} disabled={hiddenAccountIds.length===0}>Exibir todas</button>
+        <button type="button" className={btn} onClick={hideAllAccounts} disabled={visibleAccounts.length===0}>Ocultar todas</button>
       </div>
     </div>
+    <div className="mt-4 flex flex-wrap items-end gap-3">
+      <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">Filtrar contas
+        <select className={input} value={accountFilter} onChange={e=>setAccountFilter(e.target.value as "all"|"active"|"campaigns")}>
+          <option value="all">Todas as contas ({adAccounts.length})</option>
+          <option value="active">Somente contas ativas ({adAccounts.filter(a=>a.account_status===1).length})</option>
+          <option value="campaigns">Contas com campanhas ativas ({activityCheckedAt?adAccounts.filter(a=>a.account_status===1&&campaignActivity[a.id]===true).length:"verificar"})</option>
+        </select>
+      </label>
+      <button type="button" className={btn} disabled={!metaSession||activityBusy||loadingAccounts} onClick={()=>void checkActiveCampaigns()}>{activityBusy?"Verificando campanhas…":"Verificar campanhas ativas"}</button>
+      <button type="button" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40" disabled={activityBusy||(accountFilter==="campaigns"&&!activityCheckedAt)||(!matchingAccounts.length&&accountFilter!=="all")} onClick={selectOnlyMatchingAccounts}>Exibir apenas contas filtradas ({matchingAccounts.length})</button>
+    </div>
+    <p className="mt-2 text-xs text-slate-600">O filtro de campanhas consulta o estado <strong>ACTIVE</strong> na Meta, não o gasto do dia. Contas sem gasto hoje continuam incluídas quando possuem campanha ativa.</p>
+    {accountFilter==="campaigns"&&!activityCheckedAt&&!activityBusy&&<p className="mt-2 text-xs text-amber-800">Clique em “Verificar campanhas ativas” para buscar as campanhas diretamente na Meta.</p>}
+    {activityCheckedAt&&<p className="mt-2 text-xs text-slate-500">Situação das campanhas consultada em {activityCheckedAt}. Atualize para conferir alterações posteriores.</p>}
+    {activityError&&<p role="alert" className="mt-2 text-xs text-amber-800">{activityError}</p>}
     <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
-      {adAccounts.map(a=>{
+      {matchingAccounts.map(a=>{
         const enabled=!hiddenAccountIds.includes(a.id);
+        const campaignResult=campaignActivity[a.id];
         return <label key={a.id} className={"flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg border p-3 "+(enabled?"border-blue-200 bg-white":"border-slate-200 bg-slate-100/70 opacity-75")}>
-          <div className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-800">{a.name}</span><span className="block truncate text-xs text-slate-500">{a.id} · {a.currency} · Situação na Meta: {a.account_status===1?"ativa":"status "+a.account_status}</span></div>
+          <div className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-800">{a.name}</span><span className="block truncate text-xs text-slate-500">{a.id} · {a.currency} · Conta {a.account_status===1?"ativa":"status "+a.account_status}{campaignResult===true?" · Campanha ativa":campaignResult===false?" · Sem campanha ativa":activityCheckedAt&&a.account_status===1?" · Verificação indisponível":""}</span></div>
           <div className="flex items-center gap-2"><span className={"text-xs font-semibold "+(enabled?"text-green-700":"text-slate-500")}>{enabled?"Exibir":"Oculta"}</span><input type="checkbox" role="switch" aria-label={"Exibir "+a.name+" no TrackUp"} checked={enabled} onChange={e=>setAccountEnabled(a.id,e.target.checked)} className="h-5 w-5 cursor-pointer accent-blue-600"/></div>
         </label>;
       })}
+      {matchingAccounts.length===0&&<p className="rounded-lg border bg-white p-3 text-xs text-slate-500">Nenhuma conta corresponde ao filtro atual.</p>}
     </div>
-    <p className="mt-3 text-xs text-slate-500">Escolhas salvas neste navegador. Contas ocultas não aparecem nos filtros, tabelas e resumo, mas continuam autorizadas no Facebook.</p>
+    <p className="mt-3 text-xs text-slate-500">Suas escolhas de visibilidade são salvas no Supabase quando a sessão está conectada. As contas ocultas continuam autorizadas no Facebook.</p>
   </section>}
   {adAccounts.length===0?<p className="text-sm text-slate-500">{loadingAccounts?"Buscando suas contas na Meta...":"Nenhuma conta de anúncios retornada. Conecte o Facebook ou verifique as permissões de acesso."}</p>:<div className="space-y-2">{adAccounts.map(a=><div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3"><div><strong className="block text-sm">{a.name}</strong><span className="text-xs text-slate-500">{a.id} · {a.currency}</span></div><span className={"rounded-full px-3 py-1 text-xs "+(a.account_status===1?"bg-green-50 text-green-700":"bg-slate-100 text-slate-600")}>{a.account_status===1?"Ativa":"Status "+a.account_status}</span></div>)}</div>}
   {accountWarning.map((warning,i)=><p key={i} className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
