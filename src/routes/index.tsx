@@ -140,7 +140,7 @@ function Home() {
     return {since:period==="Personalizado"?(since||format(today)):format(start),until:period==="Personalizado"?(until||format(today)):period==="Ontem"?format(start):format(today)};
   };
 
-  const api = async (action:string, other:Record<string,string>={},token?:string) => {
+  const api = async (action:string, other:Record<string,unknown>={},token?:string) => {
     const response=await fetch(metaOauthEndpoint,{
       method:"POST",
       headers:{"Content-Type":"application/json",...(token?{"Authorization":"Bearer "+token}:{})},
