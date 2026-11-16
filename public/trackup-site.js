@@ -75,7 +75,7 @@
     var h=url.hostname.toLowerCase();
     if(h==="pay.cakto.com.br"||h.endsWith(".cakto.com.br"))return "cakto";
     if(h==="pay.hotmart.com"||h.endsWith(".hotmart.com"))return "hotmart";
-    if(h.indexOf("vega")!==-1)return "vega";
+    if(h.indexOf("vega")!==-1||h==="checkout.evangelhokids.cloud")return "vega";
     return "";
   }
   function tagCheckout(anchor){
