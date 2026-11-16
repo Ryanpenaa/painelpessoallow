@@ -42,26 +42,27 @@
   // because a sales page may have other Pixels installed.
   var configuredPixelId="";
   var pixelReady=false;
-  var pendingCheckoutIC=false;
-  var icStorageKey="trackup.ic."+product+"."+session.code;
-  var icSent=false;
-  try{icSent=sessionStorage.getItem(icStorageKey)==="1";}catch(e){}
+  var pendingCheckoutIC=0;
+  // Every deliberate plan choice is an event. Do not lock another plan after a click.
   function fireInitiateCheckout(){
-    if(icSent)return;
-    if(!pixelReady||!configuredPixelId){
-      pendingCheckoutIC=true;
+    if(!pixelReady||!configuredPixelId||typeof window.fbq!=="function"){
+      pendingCheckoutIC+=1;
       return;
     }
-    if(typeof window.fbq!=="function")return;
     try{
       window.fbq("trackSingle",configuredPixelId,"InitiateCheckout",{
         content_ids:[product],content_type:"product"
       });
-      icSent=true;
-      pendingCheckoutIC=false;
-      try{sessionStorage.setItem(icStorageKey,"1");}catch(e){}
-    }catch(e){pendingCheckoutIC=true;}
+    }catch(e){pendingCheckoutIC+=1;}
   }
+  function recordPlanChoice(){
+    report("checkout_click");
+    fireInitiateCheckout();
+  }
+  // The basic-plan button opens a modal instead of an external link.
+  // Expose a narrow API for that button without recording twice for checkout links.
+  window.trackupPlanChoice=window.trackupPlanChoice||{};
+  window.trackupPlanChoice[product]=recordPlanChoice;
   function report(event){
     var body={event:event,visit_code:session.code,landing_url:location.origin+location.pathname,
       fbp:cookie("_fbp"),fbc:cookie("_fbc")||fbc,fbclid:fbclid,
@@ -115,8 +116,7 @@
     if(!a)return;
     tagCheckout(a);
     if(a.dataset.trackupCheckout==="1" && !e.defaultPrevented){
-      report("checkout_click");
-      fireInitiateCheckout();
+      recordPlanChoice();
     }
   },true);
   if("MutationObserver"in window){
@@ -155,7 +155,10 @@
     window.fbq("trackSingle",id,"PageView");
     window.fbq("trackSingle",id,"ViewContent",{content_ids:[product],content_type:"product"});
     pixelReady=true;
-    if(pendingCheckoutIC)fireInitiateCheckout();
+    while(pendingCheckoutIC>0){
+      pendingCheckoutIC-=1;
+      fireInitiateCheckout();
+    }
   }
   // Public pixel ID supplied by the landing page lets IC fire without waiting
   // for the remote product-configuration request.
