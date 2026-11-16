@@ -40,11 +40,13 @@
   // A genuine checkout-link click is recorded by TrackUp and sent to the
   // product's Meta Pixel as InitiateCheckout. Never use a global fbq("track")
   // because a sales page may have other Pixels installed.
+  var pixelEventsEnabled=src.searchParams.get("pixel_events")!=="off";
   var configuredPixelId="";
   var pixelReady=false;
   var pendingCheckoutIC=0;
   // Every deliberate plan choice is an event. Do not lock another plan after a click.
   function fireInitiateCheckout(){
+    if(!pixelEventsEnabled)return;
     if(!pixelReady||!configuredPixelId||typeof window.fbq!=="function"){
       pendingCheckoutIC+=1;
       return;
@@ -162,11 +164,11 @@
   }
   // Public pixel ID supplied by the landing page lets IC fire without waiting
   // for the remote product-configuration request.
-  var earlyPixel=src.searchParams.get("pixel")||"";
+  var earlyPixel=pixelEventsEnabled?(src.searchParams.get("pixel")||""):"";
   if(/^\d{8,30}$/.test(earlyPixel))initializePixel(earlyPixel);
   fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
     if(!cfg||!cfg.pixel_id||!/^\d{8,30}$/.test(cfg.pixel_id))return;
-    if(!pixelReady)initializePixel(String(cfg.pixel_id));
+    if(pixelEventsEnabled&&!pixelReady)initializePixel(String(cfg.pixel_id));
     setTimeout(function(){report("page_view");},1800);
   }).catch(function(){});
 })();
