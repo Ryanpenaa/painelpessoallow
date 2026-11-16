@@ -68,7 +68,15 @@
       utm_source:tracked.utm_source,utm_medium:tracked.utm_medium,utm_campaign:tracked.utm_campaign,
       utm_content:tracked.utm_content,utm_term:tracked.utm_term,
       campaign_id:tracked.campaign_id,adset_id:tracked.adset_id,ad_id:tracked.ad_id};
-    fetch(api,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),keepalive:true,mode:"cors"}).catch(function(){});
+    var payload=JSON.stringify(body);
+    // sendBeacon survives immediate navigation to the external checkout.
+    // text/plain avoids the cross-origin JSON preflight on click.
+    if(event==="checkout_click"&&typeof navigator.sendBeacon==="function"){
+      try{
+        if(navigator.sendBeacon(api,new Blob([payload],{type:"text/plain;charset=UTF-8"})))return;
+      }catch(e){}
+    }
+    fetch(api,{method:"POST",headers:{"Content-Type":"text/plain;charset=UTF-8"},body:payload,keepalive:true,mode:"cors"}).catch(function(){});
   }
   // Use a tracking code supported by the checkout provider and expected in its webhook.
   function provider(url){
@@ -119,10 +127,10 @@
   // Associate the product with its configured Meta Pixel, then flush any IC
   // click that happened before the asynchronous Pixel configuration loaded.
   // No Facebook Purchase is sent by this browser-side checkout click.
-  fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
-    if(!cfg||!cfg.pixel_id||!/^\d{8,30}$/.test(cfg.pixel_id))return;
-    var id=String(cfg.pixel_id);
-    configuredPixelId=id;
+  function initializePixel(id){
+    if(!/^\\d{8,30}$/.test(String(id)))return;
+    if(pixelReady&&configuredPixelId===String(id))return;
+    configuredPixelId=String(id);
     var hasFbq=typeof window.fbq==="function";
     if(!hasFbq){
       !function(f,b,e,v,n,t,s){
@@ -132,30 +140,30 @@
         t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);
       }(window,document,"script","https://connect.facebook.net/en_US/fbevents.js");
     }
-    var pixelIds=[];
-    var stateAvailable=false;
+    var initialized=window.__trackupPixelIds||(window.__trackupPixelIds={});
+    var exists=initialized[id]===true;
     try{
-      if(typeof window.fbq==="function"&&typeof window.fbq.getState==="function"){
+      if(typeof window.fbq.getState==="function"){
         var state=window.fbq.getState();
-        if(state&&Array.isArray(state.pixels)){
-          stateAvailable=true;
-          pixelIds=state.pixels.map(function(p){return String(p.id);});
-        }
+        exists=exists||!!(state&&Array.isArray(state.pixels)&&state.pixels.some(function(p){return String(p.id)===String(id);}));
       }
     }catch(e){}
-    var initialized=window.__trackupPixelIds||(window.__trackupPixelIds={});
-    var exists=pixelIds.indexOf(id)!==-1||initialized[id]===true;
     if(!exists){
-      // Do not assume that an unknown existing fbq is safe to reinitialize.
-      // Its current initialization cannot be verified.
-      if(hasFbq&&!stateAvailable)return;
       initialized[id]=true;
       window.fbq("init",id);
-      window.fbq("trackSingle",id,"PageView");
-      window.fbq("trackSingle",id,"ViewContent",{content_ids:[product],content_type:"product"});
     }
+    window.fbq("trackSingle",id,"PageView");
+    window.fbq("trackSingle",id,"ViewContent",{content_ids:[product],content_type:"product"});
     pixelReady=true;
     if(pendingCheckoutIC)fireInitiateCheckout();
+  }
+  // Public pixel ID supplied by the landing page lets IC fire without waiting
+  // for the remote product-configuration request.
+  var earlyPixel=src.searchParams.get("pixel")||"";
+  if(/^\\d{8,30}$/.test(earlyPixel))initializePixel(earlyPixel);
+  fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
+    if(!cfg||!cfg.pixel_id||!/^\\d{8,30}$/.test(cfg.pixel_id))return;
+    if(!pixelReady)initializePixel(String(cfg.pixel_id));
     setTimeout(function(){report("page_view");},1800);
   }).catch(function(){});
 })();
