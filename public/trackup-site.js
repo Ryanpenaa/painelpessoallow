@@ -128,7 +128,7 @@
   // click that happened before the asynchronous Pixel configuration loaded.
   // No Facebook Purchase is sent by this browser-side checkout click.
   function initializePixel(id){
-    if(!/^\\d{8,30}$/.test(String(id)))return;
+    if(!/^\d{8,30}$/.test(String(id)))return;
     if(pixelReady&&configuredPixelId===String(id))return;
     configuredPixelId=String(id);
     var hasFbq=typeof window.fbq==="function";
@@ -160,9 +160,9 @@
   // Public pixel ID supplied by the landing page lets IC fire without waiting
   // for the remote product-configuration request.
   var earlyPixel=src.searchParams.get("pixel")||"";
-  if(/^\\d{8,30}$/.test(earlyPixel))initializePixel(earlyPixel);
+  if(/^\d{8,30}$/.test(earlyPixel))initializePixel(earlyPixel);
   fetch(api,{method:"GET"}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
-    if(!cfg||!cfg.pixel_id||!/^\\d{8,30}$/.test(cfg.pixel_id))return;
+    if(!cfg||!cfg.pixel_id||!/^\d{8,30}$/.test(cfg.pixel_id))return;
     if(!pixelReady)initializePixel(String(cfg.pixel_id));
     setTimeout(function(){report("page_view");},1800);
   }).catch(function(){});
