@@ -8,13 +8,13 @@ export const Route = createFileRoute("/")({ component: Home });
 const metaOauthEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/meta-oauth-callback";
 const checkoutEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/trackup-checkouts";
 const allCards = ["Faturamento", "Lucro operacional", "Gasto em Ads", "CPA", "ARPU", "ROAS", "ROI", "CPC", "CTR", "CPM", "Vendas aprovadas", "Vendas pendentes", "Chargeback", "Margem", "Cliques", "Impressões", "Checkouts iniciados"];
-const allCols = ["Status", "Campanha", "Última atualização", "Orçamento", "Gasto", "Vendas Meta", "Vendas TrackUp", "Vendas pendentes", "Faturamento", "Lucro", "ROAS", "CPA", "ARPU", "Impressões", "Cliques", "CPC", "CTR"];
+const allCols = ["Status", "Campanha", "Última atualização", "Gasto / Limite diário", "Orçamento", "Gasto", "Vendas Meta", "Vendas TrackUp", "Vendas pendentes", "Faturamento", "Lucro", "ROAS", "CPA", "ARPU", "Impressões", "Cliques", "CPC", "CTR"];
 const periods = ["Hoje", "Ontem", "7 dias", "15 dias", "30 dias", "Personalizado"];
 const defaults = ["Gasto em Ads","Faturamento","Vendas aprovadas","ROAS","CPA","ARPU","CPC","CTR","CPM","Cliques","Impressões","Checkouts iniciados"];
 type ChangeItem={id:string;createdAt:string;accountId:string;accountName:string;category:string;title:string;note:string;origin:"manual"|"trackup"};
 const changeLogKey="trackup.changes.v1";
 const validChangeItems=(value:unknown):ChangeItem[]=>Array.isArray(value)?value.filter((x):x is ChangeItem=>Boolean(x&&typeof x==="object"&&typeof x.id==="string"&&typeof x.createdAt==="string"&&typeof x.title==="string"&&typeof x.note==="string"&&typeof x.category==="string"&&typeof x.accountId==="string"&&typeof x.accountName==="string"&&(x.origin==="manual"||x.origin==="trackup"))).slice(0,200):[];
-const defaultCols = ["Status","Campanha","Orçamento","Gasto","Vendas Meta","Faturamento","ROAS","CPA","ARPU","Impressões","Cliques","CPC","CTR"];
+const defaultCols = ["Status","Campanha","Gasto / Limite diário","Orçamento","Gasto","Vendas Meta","Faturamento","ROAS","CPA","ARPU","Impressões","Cliques","CPC","CTR"];
 function Home() {
   const [page, setPage] = useState("Painel");
   const [changeLog,setChangeLog]=useState<ChangeItem[]>([]);
@@ -117,6 +117,10 @@ function Home() {
   type MetaLevel="campaign"|"adset"|"ad";
   type MetaRow={id:string;name:string;status:string;effective_status:string;campaign_id:string|null;adset_id:string|null;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null};
   const [entityRows,setEntityRows]=useState<MetaRow[]>([]);
+  const [todaySpendRows,setTodaySpendRows]=useState<Record<string,number>>({});
+  const [todaySpendBusy,setTodaySpendBusy]=useState(false);
+  const [todaySpendError,setTodaySpendError]=useState("");
+  const todaySpendSeq=useRef(0);
   const [entityBusy,setEntityBusy]=useState(false);
   const [entityError,setEntityError]=useState("");
   const [statusPending,setStatusPending]=useState<{id:string;name:string;level:MetaLevel;current:string;target:"ACTIVE"|"PAUSED"}|null>(null);
@@ -464,6 +468,26 @@ function Home() {
     }finally{if(request===entityRequest.current)setEntityBusy(false);}
   };
   useEffect(()=>{
+    const seq=++todaySpendSeq.current;
+    setTodaySpendRows({});setTodaySpendError("");
+    if(!metaSession||!selectedAccount||!visibleAccounts.some(a=>a.id===selectedAccount)||tab==="Contas"||page!=="Campanhas"||period==="Hoje"){setTodaySpendBusy(false);return;}
+    let stopped=false;
+    const fetchToday=async()=>{
+      const today=new Date(),date=[today.getFullYear(),String(today.getMonth()+1).padStart(2,"0"),String(today.getDate()).padStart(2,"0")].join("-");
+      setTodaySpendBusy(true);
+      try{
+        const response=await api("entities",{level:currentLevel,account_id:selectedAccount,since:date,until:date},metaSession);
+        if(stopped||seq!==todaySpendSeq.current)return;
+        setTodaySpendRows(Object.fromEntries((response.items||[]).map((x:{id:string;spend:number})=>[x.id,Number(x.spend)||0])));
+        if(response.partial)setTodaySpendError("A lista de gastos de hoje pode estar incompleta.");
+      }catch(e){if(!stopped&&seq===todaySpendSeq.current)setTodaySpendError(e instanceof Error?e.message:"Não foi possível carregar os gastos de hoje.");}
+      finally{if(!stopped&&seq===todaySpendSeq.current)setTodaySpendBusy(false);}
+    };
+    void fetchToday();
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)void fetchToday();},60000);
+    return()=>{stopped=true;window.clearInterval(timer);};
+  },[metaSession,selectedAccount,tab,page,period,hiddenAccountIds,visibilityLoaded]);
+  useEffect(()=>{
     setCampaignFocus("");
     setAdsetFocus("");
   },[selectedAccount]);
@@ -552,7 +576,7 @@ function Home() {
     setSummary(null);
     setOauthMessage("Facebook desconectado deste navegador.");
   };
-  useEffect(() => { try { const c = localStorage.getItem("trackup.cards"); const d = localStorage.getItem("trackup.cols"); if(c) setCards(JSON.parse(c)); if(d) setCols(JSON.parse(d)); } catch {} }, []);
+  useEffect(() => { try { const c = localStorage.getItem("trackup.cards"); const d = localStorage.getItem("trackup.cols"); if(c) setCards(JSON.parse(c)); if(d){const saved=JSON.parse(d);if(Array.isArray(saved)){const next=saved.filter((v:unknown):v is string=>typeof v==="string");if(!next.includes("Gasto / Limite diário"))next.splice(Math.max(0,next.indexOf("Orçamento")),0,"Gasto / Limite diário");setCols(next);}} } catch {} }, []);
   const change = (kind:"cards"|"cols", value:string) => {
     const current = kind==="cards"?cards:cols;
     const next = current.includes(value)?current.filter(x=>x!==value):[...current,value];
@@ -663,6 +687,7 @@ function Home() {
           </div>}
           {statusFeedback&&tab!=="Contas"&&<p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{statusFeedback}</p>}
           {entityError&&tab!=="Contas"&&<p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{entityError}</p>}
+          {todaySpendError&&tab!=="Contas"&&<p role="alert" className="text-xs text-amber-700">{todaySpendError}</p>}
           {entityPartial&&tab!=="Contas"&&<p className="text-xs text-amber-700">A Meta tem mais itens do que o limite desta consulta; a lista pode estar incompleta.</p>}
           <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white">
             <table className="w-full min-w-max text-left text-xs">
@@ -677,6 +702,17 @@ function Home() {
                     <td className="p-4"><input type="checkbox" aria-label={"Selecionar "+a.name} checked={chosenIds.includes(a.id)} onChange={e=>selectOne(a.id,e.target.checked)}/></td>
                     {cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<span className="max-w-80 break-words font-semibold">{a.name}</span>:
                       column==="Status"?a.effective_status:
+                      column==="Gasto / Limite diário"?(a.daily_budget&&Number(a.daily_budget)>0?(()=>{
+                        const cap=Number(a.daily_budget)/100;
+                        const spent=period==="Hoje"?a.spend:todaySpendRows[a.id];
+                        if(spent===undefined||!Number.isFinite(spent))return <span className="text-slate-400">{todaySpendBusy?"Carregando...":"Gasto de hoje indisponível"}</span>;
+                        const ratio=Math.max(0,spent/cap);
+                        return <div className="min-w-40 space-y-1" title={"Gasto hoje: "+money(spent,currency)+" / orçamento diário: "+money(cap,currency)}>
+                          <div className="flex items-center justify-between gap-2 whitespace-nowrap"><span className="font-semibold">{money(spent,currency)} / {money(cap,currency)}</span><span className={ratio>=1?"font-semibold text-red-700":ratio>=.8?"font-semibold text-amber-700":"text-slate-500"}>{Math.round(ratio*100)}%</span></div>
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100"><div className={"h-full rounded-full transition-all "+(ratio>=1?"bg-red-500":ratio>=.8?"bg-amber-500":"bg-blue-500")} style={{width:Math.min(100,ratio*100)+"%"}}/></div>
+                          {ratio>=1&&<span className="text-[10px] font-semibold text-red-700">Orçamento diário atingido</span>}
+                        </div>;
+                      })():<span className="text-slate-400" title="Não há orçamento diário próprio informado para este item. Pode existir orçamento de campanha ou orçamento vitalício.">Sem limite diário próprio</span>):
                       column==="Orçamento"?(a.daily_budget?money(Number(a.daily_budget)/100,currency)+" / dia":a.lifetime_budget?money(Number(a.lifetime_budget)/100,currency):"—"):
                       column==="Gasto"?money(a.spend,currency):
                       column==="Vendas Meta"?(a.purchases===null?"—":a.purchases.toLocaleString("pt-BR")):
