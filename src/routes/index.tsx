@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import TrackupDashboard, { type MetaDashboardSummary } from "../components/TrackupDashboard";
 import CheckoutIntegrations from "../components/CheckoutIntegrations";
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Megaphone, Plug, Pencil, RefreshCw, Eye, EyeOff, Download, X, Menu, Facebook, Search } from "lucide-react";
+import { BarChart3, Megaphone, Plug, Pencil, RefreshCw, Eye, EyeOff, Download, X, Menu, Facebook, Search, History, Plus, Trash2, StickyNote } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: Home });
 const metaOauthEndpoint = "https://ystxfmrhbqybdilmuzwc.supabase.co/functions/v1/meta-oauth-callback";
@@ -11,9 +11,28 @@ const allCards = ["Faturamento", "Lucro operacional", "Gasto em Ads", "CPA", "AR
 const allCols = ["Status", "Campanha", "Última atualização", "Orçamento", "Gasto", "Vendas Meta", "Vendas TrackUp", "Vendas pendentes", "Faturamento", "Lucro", "ROAS", "CPA", "ARPU", "Impressões", "Cliques", "CPC", "CTR"];
 const periods = ["Hoje", "Ontem", "7 dias", "15 dias", "30 dias", "Personalizado"];
 const defaults = ["Gasto em Ads","Faturamento","Vendas aprovadas","ROAS","CPA","ARPU","CPC","CTR","CPM","Cliques","Impressões","Checkouts iniciados"];
+type ChangeItem={id:string;createdAt:string;accountId:string;accountName:string;category:string;title:string;note:string;origin:"manual"|"trackup"};
+const changeLogKey="trackup.changes.v1";
+const validChangeItems=(value:unknown):ChangeItem[]=>Array.isArray(value)?value.filter((x):x is ChangeItem=>Boolean(x&&typeof x==="object"&&typeof x.id==="string"&&typeof x.createdAt==="string"&&typeof x.title==="string"&&typeof x.note==="string"&&typeof x.category==="string"&&typeof x.accountId==="string"&&typeof x.accountName==="string"&&(x.origin==="manual"||x.origin==="trackup"))).slice(0,200):[];
 const defaultCols = ["Status","Campanha","Orçamento","Gasto","Vendas Meta","Faturamento","ROAS","CPA","ARPU","Impressões","Cliques","CPC","CTR"];
 function Home() {
   const [page, setPage] = useState("Painel");
+  const [changeLog,setChangeLog]=useState<ChangeItem[]>([]);
+  const [changeLogLoaded,setChangeLogLoaded]=useState(false);
+  const [changeTitle,setChangeTitle]=useState("");
+  const [changeNote,setChangeNote]=useState("");
+  const [changeCategory,setChangeCategory]=useState("Lance / Bid Cap");
+  const [changeSearch,setChangeSearch]=useState("");
+  const [editingChange,setEditingChange]=useState<string|null>(null);
+  const [cloudChangeState,setCloudChangeState]=useState<"checking"|"synced"|"local"|"error">("checking");
+  useEffect(()=>{try{setChangeLog(validChangeItems(JSON.parse(localStorage.getItem(changeLogKey)||"[]")));}catch{}setChangeLogLoaded(true);},[]);
+  useEffect(()=>{if(changeLogLoaded)try{localStorage.setItem(changeLogKey,JSON.stringify(changeLog));}catch{}},[changeLogLoaded,changeLog]);
+  const addChange=(entry:Omit<ChangeItem,"id"|"createdAt">)=>{
+    const item:ChangeItem={...entry,id:typeof crypto!=="undefined"&&"randomUUID" in crypto?crypto.randomUUID():Date.now()+"-"+Math.random(),createdAt:new Date().toISOString()};
+    setChangeLog(old=>[item,...old].slice(0,200));
+  };
+  const logDate=(iso:string)=>new Date(iso).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+
   const [period, setPeriod] = useState("Hoje");
   const [cards, setCards] = useState<string[]>(defaults);
   const [cols, setCols] = useState<string[]>(defaultCols);
@@ -283,6 +302,15 @@ function Home() {
         const pref=response.preferences||{};
         if(Array.isArray(pref.hidden_accounts))setHiddenAccountIds(pref.hidden_accounts.filter((x:unknown):x is string=>typeof x==="string"&&/^act_\d+$/.test(x)));
         if(pref.selected_entities && typeof pref.selected_entities==="object" && !Array.isArray(pref.selected_entities))setSelectedEntities(pref.selected_entities);
+        if(Array.isArray(pref.change_log)){
+          const cloud=validChangeItems(pref.change_log);
+          setChangeLog(local=>{
+            const merged=new Map([...local,...cloud].map(item=>[item.id,item]));
+            return [...merged.values()].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,200);
+          });
+          setCloudChangeState("synced");
+        }else setCloudChangeState("local");
+
         if(pref.dashboard_layout && Array.isArray(pref.dashboard_layout.order) && Array.isArray(pref.dashboard_layout.active))
           setCloudDashboardLayout(pref.dashboard_layout);
         else setCloudDashboardLayout(null);
@@ -293,6 +321,7 @@ function Home() {
         // Keep local preferences when offline; never overwrite server settings after failed load.
         setCloudPreferencesReady(false);
         setPreferencesError("Preferências na nuvem indisponíveis. Suas integrações permanecem armazenadas no servidor.");
+        setCloudChangeState("error");
       }
     };
     void restore();
@@ -316,6 +345,13 @@ function Home() {
     },700);
     return ()=>window.clearTimeout(timer);
   },[cloudPreferencesReady,metaSession,selectedEntities]);
+  useEffect(()=>{
+    if(!metaSession||!cloudPreferencesReady||!changeLogLoaded)return;
+    const timer=window.setTimeout(()=>{
+      void checkoutApi("save_preferences",{section:"change_log",value:changeLog}).then(()=>setCloudChangeState("synced")).catch(()=>setCloudChangeState("local"));
+    },1000);
+    return ()=>clearTimeout(timer);
+  },[metaSession,cloudPreferencesReady,changeLogLoaded,changeLog]);
   const saveDashboardLayout=(layout:{order:string[];active:string[]})=>{
     if(!cloudPreferencesReady||!metaSession)return;
     void checkoutApi("save_preferences",{section:"dashboard_layout",value:layout}).catch(()=>{
@@ -364,6 +400,7 @@ function Home() {
         effective_status:result.effective_status|| (requested.target==="PAUSED"?"PAUSED":item.effective_status)
       }:item));
       setStatusFeedback((requested.target==="PAUSED"?"Pausado: ":"Reativado: ")+requested.name+". Status confirmado pela Meta.");
+      addChange({accountId:selectedAccount,accountName:adAccounts.find(a=>a.id===selectedAccount)?.name||selectedAccount,category:requested.level==="campaign"?"Campanha":requested.level==="adset"?"Conjunto":"Anúncio",title:(requested.target==="PAUSED"?"Pausou ":"Reativou ")+requested.name,note:"Alteração de status confirmada pela Meta.",origin:"trackup"});
       setStatusPending(null);
       if(tab==="Campanhas")void loadCampaigns();
       // Requery the authoritative Meta state; effective status may remain inactive due to parent items.
@@ -530,8 +567,12 @@ function Home() {
       <aside className={`w-56 shrink-0 border-r border-[#dce3f1] bg-white p-3 ${mobile?"fixed inset-y-0 left-0 z-30 shadow-xl":"hidden md:block"}`}>
         <div className="mb-10 flex items-center justify-between px-3 py-4 text-xl font-semibold"><span><span className="text-blue-600">◢</span> trackup</span><button className="md:hidden" onClick={()=>setMobile(false)}><X size={19}/></button></div>
         <div className="mb-2 px-3 text-xs uppercase tracking-wide text-slate-400">Dashboard Principal</div>
-        {([{label:"Painel",Icon:BarChart3},{label:"Campanhas",Icon:Megaphone},{label:"Integrações",Icon:Plug}]).map(({label,Icon})=><button key={label} onClick={()=>{setPage(label);setMobile(false)}} className={`mb-1 flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm ${page===label?"bg-[#e1e9fa] font-semibold text-blue-700":"text-[#587096] hover:bg-slate-50"}`}><Icon size={17}/>{label}</button>)}
-        <div className="mt-12 rounded-lg border border-[#dce3f1] bg-[#f6f8fc] p-3 text-xs text-slate-500"><strong className="block text-[#182d53]">Integração pendente</strong>Conecte sua conta Meta para visualizar os dados reais.</div>
+        {([{label:"Painel",Icon:BarChart3},{label:"Campanhas",Icon:Megaphone},{label:"Alterações recentes",Icon:History},{label:"Integrações",Icon:Plug}]).map(({label,Icon})=><button key={label} onClick={()=>{setPage(label);setMobile(false)}} className={`mb-1 flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm ${page===label?"bg-[#e1e9fa] font-semibold text-blue-700":"text-[#587096] hover:bg-slate-50"}`}><Icon size={17}/>{label}</button>)}
+        <div className="mt-6 rounded-lg border border-[#dce3f1] bg-[#f6f8fc] p-3 text-xs">
+          <div className="mb-2 flex items-center justify-between"><strong className="text-[#182d53]">Alterações recentes</strong><button className="font-semibold text-blue-700" onClick={()=>{setPage("Alterações recentes");setMobile(false);}}>Ver todas</button></div>
+          {changeLog.length===0?<p className="text-slate-500">Nenhum registro ainda.</p>:changeLog.slice(0,3).map(c=><button key={c.id} className="mb-2 block w-full rounded-md bg-white p-2 text-left last:mb-0" onClick={()=>{setPage("Alterações recentes");setMobile(false);}}><span className="block truncate font-semibold text-slate-800">{c.title}</span><span className="text-slate-500">{logDate(c.createdAt)}</span></button>)}
+          <button className="mt-2 w-full rounded-md bg-blue-600 p-2 font-semibold text-white" onClick={()=>{setPage("Alterações recentes");setMobile(false);}}>+ Registrar alteração</button>
+        </div>
       </aside>
       <main className="min-w-0 flex-1 p-4 md:p-7">
         <header className="mb-5 flex flex-wrap items-center gap-3"><button className={btn+" md:hidden"} onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={18}/></button><h1 className="mr-auto text-xl font-bold md:text-2xl">{page==="Painel"?"Dashboard Principal":page}</h1>{page==="Painel"&&<div className="flex flex-wrap gap-1">{periods.map(p=><button className={btn+(period===p?" border-blue-500 bg-blue-50 text-blue-700":"")} key={p} onClick={()=>setPeriod(p)}>{p}</button>)}</div>}</header>
@@ -570,6 +611,25 @@ function Home() {
   cloudReady={cloudPreferencesReady}
   onSaveCloudLayout={saveDashboardLayout}
 />
+        </div>}
+        {page==="Alterações recentes"&&<div className="space-y-4">
+          <section className="rounded-xl border border-[#dae3f2] bg-white p-4 md:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div><h2 className="flex items-center gap-2 text-lg font-bold"><History size={20}/> Diário de alterações</h2><p className="mt-1 text-sm text-slate-500">Anote ajustes de lance, orçamento, criativos e resultados. Pausas e reativações realizadas na TrackUp são registradas automaticamente.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{changeLog.length} registros</span></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">Tipo de alteração<select className={input} value={changeCategory} onChange={e=>setChangeCategory(e.target.value)}>{["Lance / Bid Cap","Orçamento","Criativo","Campanha","Conjunto","Anúncio","Página / Checkout","Outros"].map(x=><option key={x}>{x}</option>)}</select></label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">Conta vinculada<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Sem conta selecionada</option>{adAccounts.map(a=><option value={a.id} key={a.id}>{a.name}</option>)}</select></label>
+            </div>
+            <label className="mt-3 flex flex-col gap-1 text-xs font-semibold text-slate-600">O que foi alterado?<input className={input} maxLength={180} value={changeTitle} onChange={e=>setChangeTitle(e.target.value)} placeholder="Ex.: Aumentei Bid Cap de US$ 7 para US$ 9 na campanha Moto"/></label>
+            <label className="mt-3 flex flex-col gap-1 text-xs font-semibold text-slate-600">Anotações / hipótese<textarea className={input+" min-h-24 w-full"} maxLength={2000} value={changeNote} onChange={e=>setChangeNote(e.target.value)} placeholder="Ex.: Aguardar 48 horas e comparar CPA e vendas antes de mexer novamente."/></label>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-slate-500">Data e hora registradas automaticamente. {cloudChangeState==="synced"?"Sincronização com a nuvem confirmada.":cloudChangeState==="local"?"Dados salvos neste navegador; sincronização entre dispositivos não confirmada.":cloudChangeState==="error"?"Sem conexão com a nuvem; salvamento local ativo.":"Verificando sincronização."}</span><button type="button" disabled={!changeTitle.trim()} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40" onClick={()=>{addChange({accountId:selectedAccount,accountName:adAccounts.find(a=>a.id===selectedAccount)?.name||"",category:changeCategory,title:changeTitle.trim(),note:changeNote.trim(),origin:"manual"});setChangeTitle("");setChangeNote("");}}><Plus size={16}/> Salvar alteração</button></div>
+          </section>
+          <section className="rounded-xl border border-[#dae3f2] bg-white p-4 md:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Linha do tempo</h2><input className={input} value={changeSearch} onChange={e=>setChangeSearch(e.target.value)} placeholder="Buscar histórico..."/></div>
+            <div className="space-y-3">{changeLog.filter(c=>(c.title+" "+c.note+" "+c.category+" "+c.accountName).toLowerCase().includes(changeSearch.toLowerCase())).length===0?<p className="py-10 text-center text-sm text-slate-500">Nenhuma alteração encontrada. Registre a primeira acima.</p>:changeLog.filter(c=>(c.title+" "+c.note+" "+c.category+" "+c.accountName).toLowerCase().includes(changeSearch.toLowerCase())).map(c=><article key={c.id} className="rounded-lg border border-slate-200 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0 flex-1"><div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">{c.category}</span><span className="text-slate-500">{logDate(c.createdAt)}</span>{c.origin==="trackup"&&<span className="rounded-full bg-green-50 px-2 py-1 text-green-700">Registrado automaticamente</span>}</div><h3 className="mt-2 break-words font-semibold">{c.title}</h3>{c.accountName&&<p className="mt-1 text-xs text-slate-500">Conta: {c.accountName}</p>}</div><button className="rounded-md p-2 text-slate-500 hover:bg-red-50 hover:text-red-700" title="Excluir anotação" aria-label={"Excluir "+c.title} onClick={()=>{if(window.confirm("Excluir este registro?"))setChangeLog(old=>old.filter(x=>x.id!==c.id));}}><Trash2 size={16}/></button></div>
+              {editingChange===c.id?<div className="mt-3"><textarea className={input+" min-h-20 w-full"} value={c.note} maxLength={2000} onChange={e=>setChangeLog(old=>old.map(x=>x.id===c.id?{...x,note:e.target.value}:x))}/><button className="mt-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white" onClick={()=>setEditingChange(null)}>Concluir</button></div>:<div className="mt-2 flex items-start gap-2"><p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-slate-600">{c.note||"Sem observações."}</p><button className="shrink-0 text-xs font-semibold text-blue-700" onClick={()=>setEditingChange(c.id)}><StickyNote size={14} className="inline"/> Anotar</button></div>}
+            </article>)}</div>
+          </section>
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
           <div className="flex overflow-x-auto border-b border-[#dce3f1]">
