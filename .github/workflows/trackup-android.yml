@@ -1,0 +1,55 @@
+name: TrackUp Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android/**'
+      - 'public/favicon.svg'
+      - '.github/workflows/trackup-android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout TrackUp
+        uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Render original TrackUp icon
+        run: |
+          python3 -m pip install --user cairosvg
+          mkdir -p android/app/src/main/res/drawable
+          python3 - <<'PY'
+          import cairosvg
+          cairosvg.svg2png(url="public/favicon.svg", write_to="android/app/src/main/res/drawable/ic_launcher.png", output_width=512, output_height=512)
+          PY
+
+      - name: Build Android APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: trackup-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
