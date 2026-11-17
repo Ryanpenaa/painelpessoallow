@@ -343,7 +343,7 @@ function Home() {
     if(!alertsOn||!metaSession||!selectedAccount||!visibleAccounts.some(a=>a.id===selectedAccount)){setAlertsData([]);setAlertsError("");setAlertsLoading(false);return;}
     const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-");
     setAlertsLoading(true);setAlertsError("");
-    try{const r=await api("entities",{account_id:selectedAccount,level:alertsLevel,since:today,until:today},metaSession);if(seq!==alertsSeq.current)return;setAlertsData((r.entities||r.rows||[]).map((x:{id:string;name:string;spend:number})=>({id:x.id,name:x.name,spend:Number(x.spend)||0})));if(r.partial)setAlertsError("Lista parcial da Meta.");}
+    try{const r=await api("entities",{account_id:selectedAccount,level:alertsLevel,since:today,until:today},metaSession);if(seq!==alertsSeq.current)return;setAlertsData((r.items||[]).map((x:{id:string;name:string;spend:number})=>({id:x.id,name:x.name,spend:Number(x.spend)||0})));if(r.partial)setAlertsError("Lista parcial da Meta.");}
     catch(e){if(seq===alertsSeq.current){setAlertsData([]);setAlertsError(e instanceof Error?e.message:"Falha ao carregar alertas.");}}
     finally{if(seq===alertsSeq.current)setAlertsLoading(false);}
   };
