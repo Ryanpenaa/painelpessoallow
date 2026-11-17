@@ -94,6 +94,9 @@ function Home() {
   const [entityRows,setEntityRows]=useState<MetaRow[]>([]);
   const [entityBusy,setEntityBusy]=useState(false);
   const [entityError,setEntityError]=useState("");
+  const [statusPending,setStatusPending]=useState<{id:string;name:string;level:MetaLevel;current:string;target:"ACTIVE"|"PAUSED"}|null>(null);
+  const [statusChanging,setStatusChanging]=useState(false);
+  const [statusFeedback,setStatusFeedback]=useState("");
   const [entityPartial,setEntityPartial]=useState(false);
   const [campaignFocus,setCampaignFocus]=useState("");
   const [adsetFocus,setAdsetFocus]=useState("");
@@ -328,6 +331,28 @@ function Home() {
       setCampaigns([]);
     }finally{setCampaignBusy(false);campaignsLock.current=false;}
   };
+  const changeEntityStatus=async()=>{
+    if(!statusPending||!metaSession||!selectedAccount||statusChanging)return;
+    const requested=statusPending;
+    setStatusChanging(true);setStatusFeedback("");setEntityError("");
+    try{
+      const result=await api("update_entity_status",{
+        account_id:selectedAccount,entity_id:requested.id,level:requested.level,status:requested.target
+      },metaSession);
+      if(!result.ok)throw new Error("A Meta não confirmou a alteração.");
+      setEntityRows(old=>old.map(item=>item.id===requested.id?{
+        ...item,status:result.status||requested.target,
+        effective_status:result.effective_status|| (requested.target==="PAUSED"?"PAUSED":item.effective_status)
+      }:item));
+      setStatusFeedback((requested.target==="PAUSED"?"Pausado: ":"Reativado: ")+requested.name+". Status confirmado pela Meta.");
+      setStatusPending(null);
+      if(tab==="Campanhas")void loadCampaigns();
+      // Requery the authoritative Meta state; effective status may remain inactive due to parent items.
+      setTimeout(()=>{void loadEntities();},500);
+    }catch(e){
+      setEntityError(e instanceof Error?e.message:"Falha ao alterar o status na Meta.");
+    }finally{setStatusChanging(false);}
+  };
   const loadSummary=async()=>{
     if(!metaSession || !selectedAccount || !visibleAccounts.some(a=>a.id===selectedAccount) || summaryLock.current || Date.now()<throttleUntil.current)return;
     summaryLock.current=true;
@@ -548,6 +573,7 @@ function Home() {
               <button onClick={()=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:[]}));}} className="font-medium text-blue-700 underline">Limpar seleção</button>
             </div>
           </div>}
+          {statusFeedback&&tab!=="Contas"&&<p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{statusFeedback}</p>}
           {entityError&&tab!=="Contas"&&<p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{entityError}</p>}
           {entityPartial&&tab!=="Contas"&&<p className="text-xs text-amber-700">A Meta tem mais itens do que o limite desta consulta; a lista pode estar incompleta.</p>}
           <div className="overflow-x-auto rounded-xl border border-[#dae3f2] bg-white">
@@ -555,7 +581,7 @@ function Home() {
               <thead className="border-b bg-[#fcfdff] text-slate-500"><tr>
                 <th className="p-4">{tab==="Contas"?<input type="checkbox" aria-label="Selecionar todas as contas exibidas" checked={filteredAccounts.length>0&&filteredAccounts.every(a=>selectedAccountIds.includes(a.id))} onChange={e=>setSelectedEntities(old=>({...old,accounts:e.target.checked?Array.from(new Set([...(old["accounts"]||[]),...filteredAccounts.map(a=>a.id)])):(old["accounts"]||[]).filter(id=>!filteredAccounts.some(a=>a.id===id))}))}/>:<input type="checkbox" aria-label="Selecionar itens exibidos" checked={filteredEntities.length>0&&filteredEntities.every(a=>chosenIds.includes(a.id))} onChange={e=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:e.target.checked?Array.from(new Set([...(old[key]||[]),...filteredEntities.map(a=>a.id)])):(old[key]||[]).filter(id=>!filteredEntities.some(a=>a.id===id))}));}}/>}</th>
                 {cols.map(c=><th className="px-4 py-4 uppercase" key={c}>{c==="Campanha"?(tab==="Contas"?"Conta":tab==="Conjuntos"?"Conjunto":tab==="Anúncios"?"Anúncio":"Campanha"):c==="Vendas Meta"?"Compras Meta":c==="Faturamento"?"Valor compras Meta":c}</th>)}
-                {tab!=="Contas"&&<th className="px-4 py-4">Detalhar</th>}
+                {tab!=="Contas"&&<><th className="px-4 py-4">Detalhar</th><th className="px-4 py-4">Controle Meta</th></>}
               </tr></thead>
               <tbody>
                 {tab==="Contas"?filteredAccounts.map(a=><tr key={a.id} className={"border-b "+(selectedAccountIds.includes(a.id)?"bg-blue-50/60":"")}><td className="p-4"><input type="checkbox" aria-label={"Selecionar conta "+a.name} checked={selectedAccountIds.includes(a.id)} onChange={e=>selectAccountForTracking(a.id,e.target.checked)}/></td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<button className="font-semibold text-blue-700" onClick={()=>{setSelectedAccount(a.id);setTab("Campanhas");}}>{a.name}</button>:column==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):
@@ -575,8 +601,9 @@ function Home() {
                       column==="CPC"?money(a.cpc,currency):
                       column==="CTR"?a.ctr.toFixed(2)+"%":"—"}</td>)}
                     <td className="px-4 py-4">{currentLevel==="campaign"?<button className="font-semibold text-blue-700 underline" onClick={()=>{setTab("Conjuntos");setCampaignFocus(a.id);}}>Ver conjuntos</button>:currentLevel==="adset"?<button className="font-semibold text-blue-700 underline" onClick={()=>{setTab("Anúncios");setCampaignFocus(a.campaign_id||"");setAdsetFocus(a.id);}}>Ver anúncios</button>:"—"}</td>
+                    <td className="px-4 py-4"><button type="button" disabled={statusChanging||entityBusy||!(a.status==="PAUSED"||a.status==="ACTIVE")} className={"rounded-md border px-3 py-1.5 font-semibold disabled:opacity-40 "+(a.status==="PAUSED"?"border-green-200 bg-green-50 text-green-800":"border-amber-200 bg-amber-50 text-amber-800")} onClick={()=>{setStatusFeedback("");setEntityError("");setStatusPending({id:a.id,name:a.name,level:currentLevel,current:a.status,target:a.status==="PAUSED"?"ACTIVE":"PAUSED"});}}>{a.status==="PAUSED"?"Reativar":a.status==="ACTIVE"?"Pausar":"Indisponível"}</button></td>
                   </tr>)}
-                {(tab==="Contas"?filteredAccounts.length===0:filteredEntities.length===0)&&<tr><td colSpan={cols.length+(tab==="Contas"?1:2)} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta corresponde aos filtros ou à seleção atual.":entityBusy?"Buscando dados na Meta...":entityError||"Nenhum item corresponde aos filtros atuais."}</td></tr>}
+                {(tab==="Contas"?filteredAccounts.length===0:filteredEntities.length===0)&&<tr><td colSpan={cols.length+(tab==="Contas"?1:3)} className="px-6 py-16 text-center text-sm text-slate-500">{tab==="Contas"?"Nenhuma conta corresponde aos filtros ou à seleção atual.":entityBusy?"Buscando dados na Meta...":entityError||"Nenhum item corresponde aos filtros atuais."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -640,6 +667,19 @@ function Home() {
         {updated&&<p className="mt-5 text-xs text-slate-400">Interface atualizada às {updated}. Dados externos dependem da integração.</p>}
       </main>
     </div>
+    {statusPending&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="meta-status-title" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+        <h3 id="meta-status-title" className="text-lg font-bold text-slate-900">Confirmar {statusPending.target==="PAUSED"?"pausa":"reativação"} na Meta</h3>
+        <p className="mt-3 break-words text-sm text-slate-700"><strong>{statusPending.name}</strong></p>
+        <p className="mt-1 text-xs text-slate-500">{statusPending.level==="campaign"?"Campanha":statusPending.level==="adset"?"Conjunto de anúncios":"Anúncio"} · Conta {selectedAccount}</p>
+        <p className="mt-3 text-sm text-slate-700">{statusPending.target==="PAUSED"?"Este item será pausado no próprio Facebook Ads, não apenas ocultado do TrackUp.":"O item será marcado como ativo no Facebook Ads. A entrega ainda depende da campanha, do conjunto, da conta e da revisão da Meta."}</p>
+        {entityError&&<p role="alert" className="mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800">{entityError}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" disabled={statusChanging} className={btn} onClick={()=>{setStatusPending(null);setEntityError("");}}>Cancelar</button>
+          <button type="button" disabled={statusChanging} className={"rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 "+(statusPending.target==="PAUSED"?"bg-amber-700":"bg-green-700")} onClick={()=>void changeEntityStatus()}>{statusChanging?"Enviando à Meta…":statusPending.target==="PAUSED"?"Confirmar pausa":"Confirmar reativação"}</button>
+        </div>
+      </div>
+    </div>}
     {edit&&<div className="fixed inset-0 z-40 flex items-center justify-center bg-[#15233f]/50 p-4" onClick={()=>setEdit(null)}><div role="dialog" aria-modal="true" aria-label="Personalizar visualização" onClick={e=>e.stopPropagation()} className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-xl bg-white p-6 shadow-xl"><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-bold">{edit==="cards"?"Editar cards do painel":"Editar colunas"}</h2><button onClick={()=>setEdit(null)} aria-label="Fechar"><X size={20}/></button></div><p className="mb-4 text-sm text-slate-500">Marque as informações que deseja exibir. Preferências salvas neste navegador.</p><div className="grid gap-2 sm:grid-cols-2">{(edit==="cards"?allCards:allCols).map(x=><label key={x} className="flex cursor-pointer items-center gap-3 rounded-md border border-[#e1e7f1] p-3 text-sm"><input className="accent-blue-600" type="checkbox" checked={(edit==="cards"?cards:cols).includes(x)} onChange={()=>change(edit,x)}/>{x}</label>)}</div><div className="mt-5 flex justify-end gap-2"><button className={btn} onClick={()=>{const v=edit==="cards"?defaults:defaultCols;if(edit==="cards")setCards(v);else setCols(v);localStorage.setItem("trackup."+edit,JSON.stringify(v));}}>Restaurar padrão</button><button onClick={()=>setEdit(null)} className="rounded-md bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Concluir</button></div></div></div>}
   </div>;
 }
