@@ -715,7 +715,7 @@ function Home() {
         </div>}
         {page==="Campanhas"&&<div className="space-y-4">
           <div className="flex overflow-x-auto border-b border-[#dce3f1]">
-            {["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>{setTab(t);setShowSelectedOnly(false);}} className={"whitespace-nowrap border-b-2 px-5 py-3 text-sm "+(tab===t?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500")}>{t}</button>)}
+            {["Contas","Campanhas","Conjuntos","Anúncios"].map(t=><button key={t} onClick={()=>{if(t==="Conjuntos"){const selected=selectedEntities[selectionKey("campaign")]||[];setCampaignFocus(selected.length===1?selected[0]:"");setAdsetFocus("");}else if(t==="Anúncios"){const campaignsSelected=selectedEntities[selectionKey("campaign")]||[];const adsetsSelected=selectedEntities[selectionKey("adset")]||[];if(tab==="Campanhas"){setCampaignFocus(campaignsSelected.length===1?campaignsSelected[0]:"");setAdsetFocus("");}else if(tab==="Conjuntos"){setAdsetFocus(adsetsSelected.length===1?adsetsSelected[0]:"");}}setTab(t);setShowSelectedOnly(false);}} className={"whitespace-nowrap border-b-2 px-5 py-3 text-sm "+(tab===t?"border-blue-600 font-semibold text-blue-600":"border-transparent text-slate-500")}>{t}</button>)}
           </div>
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#dae3f2] bg-white p-4">
             <label className="flex flex-col gap-1 text-xs text-slate-500">Conta de anúncios<select className={input} value={selectedAccount} onChange={e=>setSelectedAccount(e.target.value)}><option value="">Selecione uma conta</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
