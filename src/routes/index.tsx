@@ -89,6 +89,17 @@ function Home() {
     setHiddenAccountIds(adAccounts.filter(a=>!allowed.has(a.id)).map(a=>a.id));
   };
 
+  type AccountMetrics={period:MetaDashboardSummary|null;today:MetaDashboardSummary|null;dailyBudget:number|null;budgetComplete:boolean;error:string};
+  const [accountMetrics,setAccountMetrics]=useState<Record<string,AccountMetrics>>({});
+  const [accountMetricsBusy,setAccountMetricsBusy]=useState(false);
+  const [accountMetricsUpdated,setAccountMetricsUpdated]=useState("");
+  const [accountCaps,setAccountCaps]=useState<Record<string,number>>({});
+  const [accountCapsLoaded,setAccountCapsLoaded]=useState(false);
+  const [editingAccountCap,setEditingAccountCap]=useState<string|null>(null);
+  const [accountCapInput,setAccountCapInput]=useState("");
+  const accountMetricsSeq=useRef(0);
+  useEffect(()=>{try{const obj=JSON.parse(localStorage.getItem("trackup.account-caps.v1")||"{}");if(obj&&typeof obj==="object"&&!Array.isArray(obj))setAccountCaps(Object.fromEntries(Object.entries(obj).filter(([k,v])=>/^act_\d+$/.test(k)&&typeof v==="number"&&Number.isFinite(v)&&v>0)));}catch{}setAccountCapsLoaded(true);},[]);
+  useEffect(()=>{if(accountCapsLoaded)try{localStorage.setItem("trackup.account-caps.v1",JSON.stringify(accountCaps));}catch{}},[accountCaps,accountCapsLoaded]);
   const [accountWarning, setAccountWarning] = useState<string[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [summary, setSummary] = useState<MetaDashboardSummary|null>(null);
@@ -501,6 +512,47 @@ function Home() {
     const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)void loadEntities();},120000);
     return ()=>window.clearInterval(timer);
   },[page,autoRefresh,selectedAccount,metaSession,tab,period,since,until]);
+
+  useEffect(()=>{
+    const seq=++accountMetricsSeq.current;
+    if(page!=="Campanhas"||tab!=="Contas"||!metaSession||!visibleAccounts.length){
+      setAccountMetricsBusy(false);
+      return;
+    }
+    let cancelled=false;
+    const fetchMetrics=async()=>{
+      setAccountMetricsBusy(true);
+      const range=rangeDates();
+      const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-");
+      const target=visibleAccounts.slice();
+      const next:Record<string,AccountMetrics>={};
+      for(let start=0;start<target.length;start+=3){
+        if(cancelled||seq!==accountMetricsSeq.current)break;
+        await Promise.all(target.slice(start,start+3).map(async account=>{
+          try{
+            const isToday=range.since===today&&range.until===today;
+            const [todayResponse,periodResponse,campaignResponse]=await Promise.all([
+              api("summary",{account_id:account.id,period:"Hoje",since:today,until:today},metaSession),
+              isToday?Promise.resolve(null):api("summary",{account_id:account.id,period,since:range.since,until:range.until},metaSession),
+              api("campaigns",{account_id:account.id,since:today,until:today},metaSession)
+            ]);
+            const campaignsList=Array.isArray(campaignResponse.campaigns)?campaignResponse.campaigns:[];
+            const daily=campaignsList.filter((c:{effective_status?:string;status?:string})=>c.effective_status==="ACTIVE"||c.status==="ACTIVE");
+            const defined=daily.filter((c:{daily_budget?:string|null})=>Number(c.daily_budget)>0);
+            const dailyBudget=daily.length&&defined.length===daily.length?defined.reduce((sum:number,c:{daily_budget:string})=>sum+Number(c.daily_budget)/100,0):null;
+            next[account.id]={today:todayResponse.summary||null,period:isToday?todayResponse.summary||null:periodResponse?.summary||null,dailyBudget,budgetComplete:daily.length===defined.length,error:""};
+          }catch(e){
+            next[account.id]={today:null,period:null,dailyBudget:null,budgetComplete:false,error:e instanceof Error?e.message:"Erro ao carregar métricas"};
+          }
+        }));
+        if(!cancelled&&seq===accountMetricsSeq.current)setAccountMetrics({...next});
+      }
+      if(!cancelled&&seq===accountMetricsSeq.current){setAccountMetricsBusy(false);setAccountMetricsUpdated(new Date().toLocaleTimeString("pt-BR"));}
+    };
+    void fetchMetrics();
+    const timer=window.setInterval(()=>{if(document.visibilityState==="visible"&&navigator.onLine)void fetchMetrics();},120000);
+    return()=>{cancelled=true;window.clearInterval(timer);};
+  },[page,tab,metaSession,adAccounts,hiddenAccountIds,visibilityLoaded,period,since,until,autoRefresh]);
   const filteredEntities=entityRows.filter(item=>
     (status==="Qualquer"||(status==="Ativo"?item.effective_status==="ACTIVE":item.effective_status.includes("PAUSED"))) &&
     item.name.toLowerCase().includes(query.toLowerCase()) &&
@@ -691,6 +743,7 @@ function Home() {
               <button onClick={()=>{const key=selectionKey(currentLevel);setSelectedEntities(old=>({...old,[key]:[]}));}} className="font-medium text-blue-700 underline">Limpar seleção</button>
             </div>
           </div>}
+          {tab==="Contas"&&<div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span>{accountMetricsBusy?"Buscando gastos e métricas das contas…":accountMetricsUpdated?"Dados consultados às "+accountMetricsUpdated:"Aguardando consulta de contas"}</span><span>O teto diário manual é opcional e não altera limites na Meta.</span></div>}
           {statusFeedback&&tab!=="Contas"&&<p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{statusFeedback}</p>}
           {entityError&&tab!=="Contas"&&<p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{entityError}</p>}
           {todaySpendError&&tab!=="Contas"&&<p role="alert" className="text-xs text-amber-700">{todaySpendError}</p>}
@@ -703,7 +756,34 @@ function Home() {
                 {tab!=="Contas"&&<><th className="px-4 py-4">Detalhar</th><th className="px-4 py-4">Controle Meta</th></>}
               </tr></thead>
               <tbody>
-                {tab==="Contas"?filteredAccounts.map(a=><tr key={a.id} className={"border-b "+(selectedAccountIds.includes(a.id)?"bg-blue-50/60":"")}><td className="p-4"><input type="checkbox" aria-label={"Selecionar conta "+a.name} checked={selectedAccountIds.includes(a.id)} onChange={e=>selectAccountForTracking(a.id,e.target.checked)}/></td>{cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<button className="font-semibold text-blue-700" onClick={()=>{setSelectedAccount(a.id);setTab("Campanhas");}}>{a.name}</button>:column==="Status"?(a.account_status===1?"Ativa":"Status "+a.account_status):"—"}</td>)}</tr>):
+                {tab==="Contas"?filteredAccounts.map(a=><tr key={a.id} className={"border-b "+(selectedAccountIds.includes(a.id)?"bg-blue-50/60":"")}><td className="p-4"><input type="checkbox" aria-label={"Selecionar conta "+a.name} checked={selectedAccountIds.includes(a.id)} onChange={e=>selectAccountForTracking(a.id,e.target.checked)}/></td>{cols.map(column=><td key={column} className="px-4 py-4">{(()=>{
+  const item=accountMetrics[a.id],stats=item?.period,spent=item?.today?.spend;
+  const limit=accountCaps[a.id]??item?.dailyBudget??null;
+  const manual=accountCaps[a.id]!==undefined;
+  if(column==="Campanha")return <button className="font-semibold text-blue-700" onClick={()=>{setSelectedAccount(a.id);setTab("Campanhas");}}>{a.name}</button>;
+  if(column==="Status")return a.account_status===1?"Ativa":"Status "+a.account_status;
+  if(column==="Gasto / Limite diário")return <div className="min-w-44 space-y-1">
+    <div className="flex items-center justify-between gap-2">
+      <span className="font-semibold">{item?.today?money(spent??0,a.currency):item?.error?"Indisponível":"Carregando..."}</span>
+      <span className="text-slate-500">/ {limit!==null?money(limit,a.currency):"sem teto definido"}</span>
+    </div>
+    {limit!==null&&limit>0&&item?.today&&<div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={"h-full rounded-full "+((spent??0)>=limit?"bg-red-500":(spent??0)>=limit*.8?"bg-amber-500":"bg-blue-500")} style={{width:Math.min(100,Math.max(0,(spent??0)/limit*100))+"%"}}/></div>}
+    <div className="flex items-center gap-2 text-[10px] text-slate-500"><span>{manual?"Teto manual":limit!==null?"Soma dos orçamentos diários":"Orçamento da conta não disponível"}</span><button className="font-semibold text-blue-700 underline" onClick={()=>{setEditingAccountCap(a.id);setAccountCapInput(manual?String(accountCaps[a.id]):"");}}>Definir teto</button></div>
+    {item?.error&&<span title={item.error} className="text-amber-700">Erro de consulta</span>}
+  </div>;
+  if(column==="Orçamento")return limit!==null?money(limit,a.currency)+(manual?" / dia (manual)":" / dia (campanhas)"):"Sem orçamento diário consolidado";
+  if(column==="Gasto")return stats?money(stats.spend,a.currency):item?.error?"Indisponível":"Carregando...";
+  if(column==="Vendas Meta")return stats?.purchases==null?"—":stats.purchases.toLocaleString("pt-BR");
+  if(column==="Faturamento")return stats?.purchase_value==null?"—":money(stats.purchase_value,a.currency);
+  if(column==="ROAS")return stats?.meta_roas==null?"—":stats.meta_roas.toFixed(2)+"x";
+  if(column==="CPA")return stats?.meta_cpa==null?"—":money(stats.meta_cpa,a.currency);
+  if(column==="ARPU")return stats?.meta_arpu==null?"—":money(stats.meta_arpu,a.currency);
+  if(column==="Impressões")return stats?stats.impressions.toLocaleString("pt-BR"):"—";
+  if(column==="Cliques")return stats?stats.clicks.toLocaleString("pt-BR"):"—";
+  if(column==="CPC")return stats?money(stats.cpc,a.currency):"—";
+  if(column==="CTR")return stats?stats.ctr.toFixed(2)+"%":"—";
+  return "—";
+})()}</td>)}</tr>):
                   filteredEntities.map(a=><tr key={a.id} className={"border-b "+(chosenIds.includes(a.id)?"bg-blue-50/60":"")}>
                     <td className="p-4"><input type="checkbox" aria-label={"Selecionar "+a.name} checked={chosenIds.includes(a.id)} onChange={e=>selectOne(a.id,e.target.checked)}/></td>
                     {cols.map(column=><td key={column} className="px-4 py-4">{column==="Campanha"?<span className="max-w-80 break-words font-semibold">{a.name}</span>:
@@ -797,6 +877,19 @@ function Home() {
         {updated&&<p className="mt-5 text-xs text-slate-400">Interface atualizada às {updated}. Dados externos dependem da integração.</p>}
       </main>
     </div>
+    {editingAccountCap&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" role="dialog" aria-modal="true" aria-label="Definir teto diário da conta">
+        <h3 className="text-lg font-bold">Teto diário para acompanhamento</h3>
+        <p className="mt-2 text-sm text-slate-600">Conta: {adAccounts.find(a=>a.id===editingAccountCap)?.name||editingAccountCap}</p>
+        <p className="mt-2 text-xs text-slate-500">Valor informativo da TrackUp, na moeda da conta. Não altera orçamento nem limite na Meta.</p>
+        <input className={input+" mt-3 w-full"} type="number" min="0.01" step="0.01" aria-label="Valor do teto diário" value={accountCapInput} onChange={e=>setAccountCapInput(e.target.value)} placeholder="Ex.: 2.00"/>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <button className={btn} onClick={()=>{setAccountCaps(old=>{const next={...old};delete next[editingAccountCap];return next;});setEditingAccountCap(null);}}>Remover teto</button>
+          <button className={btn} onClick={()=>setEditingAccountCap(null)}>Cancelar</button>
+          <button disabled={!Number.isFinite(Number(accountCapInput))||Number(accountCapInput)<=0} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40" onClick={()=>{setAccountCaps(old=>({...old,[editingAccountCap]:Number(accountCapInput)}));setEditingAccountCap(null);}}>Salvar</button>
+        </div>
+      </div>
+    </div>}
     {statusPending&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
       <div role="dialog" aria-modal="true" aria-labelledby="meta-status-title" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <h3 id="meta-status-title" className="text-lg font-bold text-slate-900">Confirmar {statusPending.target==="PAUSED"?"pausa":"reativação"} na Meta</h3>
