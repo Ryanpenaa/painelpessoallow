@@ -86,6 +86,12 @@ function Home() {
   const [chosenProduct,setChosenProduct]=useState("");
   const [checkoutStats,setCheckoutStats]=useState<{product_pie:Array<{name:string;value:number}>;payment_pie:Array<{name:string;value:number}>;approved_count:number;revenue_by_currency:Record<string,number>}|null>(null);
   const [selectedAccount, setSelectedAccount] = useState("");
+
+  const [alertsOn,setAlertsOn]=useState(true),[alertsEdit,setAlertsEdit]=useState(false),[alertsCap,setAlertsCap]=useState(10),[alertsPct,setAlertsPct]=useState(80),[alertsCount,setAlertsCount]=useState(5),[alertsLevel,setAlertsLevel]=useState<"campaign"|"adset"|"ad">("ad");
+  const [alertsData,setAlertsData]=useState<Array<{id:string;name:string;spend:number}>>([]),[alertsError,setAlertsError]=useState(""),[alertsLoading,setAlertsLoading]=useState(false);
+  const alertsSeq=useRef(0);
+  useEffect(()=>{try{const v=JSON.parse(localStorage.getItem("trackup.alerts.v1")||"{}");if(typeof v.on==="boolean")setAlertsOn(v.on);if(Number(v.cap)>0)setAlertsCap(Number(v.cap));if(Number(v.pct)>=1&&Number(v.pct)<=100)setAlertsPct(Number(v.pct));if([3,5,10,20].includes(v.count))setAlertsCount(v.count);if(["campaign","adset","ad"].includes(v.level))setAlertsLevel(v.level);}catch{}},[]);
+  useEffect(()=>{try{localStorage.setItem("trackup.alerts.v1",JSON.stringify({on:alertsOn,cap:alertsCap,pct:alertsPct,count:alertsCount,level:alertsLevel}));}catch{}},[alertsOn,alertsCap,alertsPct,alertsCount,alertsLevel]);
   const [campaigns, setCampaigns] = useState<Array<{id:string;name:string;status:string;effective_status:string;daily_budget:string|null;lifetime_budget:string|null;spend:number;impressions:number;clicks:number;cpc:number;ctr:number;cpm:number;purchases:number|null;purchase_value:number|null;checkouts:number|null;link_clicks:number|null;meta_roas:number|null;meta_cpa:number|null;meta_arpu:number|null;purchase_action_type:string|null;attribution_source:string}>>([]);
   const [campaignBusy, setCampaignBusy] = useState(false);
   const [campaignError, setCampaignError] = useState("");
@@ -331,6 +337,19 @@ function Home() {
       setCampaigns([]);
     }finally{setCampaignBusy(false);campaignsLock.current=false;}
   };
+
+  const loadAlerts=async()=>{
+    const seq=++alertsSeq.current;
+    if(!alertsOn||!metaSession||!selectedAccount||!visibleAccounts.some(a=>a.id===selectedAccount)){setAlertsData([]);setAlertsError("");setAlertsLoading(false);return;}
+    const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-");
+    setAlertsLoading(true);setAlertsError("");
+    try{const r=await api("entities",{account_id:selectedAccount,level:alertsLevel,since:today,until:today},metaSession);if(seq!==alertsSeq.current)return;setAlertsData((r.entities||r.rows||[]).map((x:{id:string;name:string;spend:number})=>({id:x.id,name:x.name,spend:Number(x.spend)||0})));if(r.partial)setAlertsError("Lista parcial da Meta.");}
+    catch(e){if(seq===alertsSeq.current){setAlertsData([]);setAlertsError(e instanceof Error?e.message:"Falha ao carregar alertas.");}}
+    finally{if(seq===alertsSeq.current)setAlertsLoading(false);}
+  };
+  useEffect(()=>{void loadAlerts();},[alertsOn,alertsLevel,selectedAccount,metaSession,hiddenAccountIds,visibilityLoaded]);
+  useEffect(()=>{if(!autoRefresh||!alertsOn||!selectedAccount)return;const t=window.setInterval(()=>{if(document.visibilityState==="visible")void loadAlerts();},60000);return()=>clearInterval(t);},[autoRefresh,alertsOn,alertsLevel,selectedAccount,metaSession,hiddenAccountIds]);
+  const alertsWarn=alertsData.filter(x=>x.spend>=alertsCap*alertsPct/100).sort((a,b)=>b.spend-a.spend).slice(0,alertsCount);
   const changeEntityStatus=async()=>{
     if(!statusPending||!metaSession||!selectedAccount||statusChanging)return;
     const requested=statusPending;
@@ -518,6 +537,15 @@ function Home() {
         <header className="mb-5 flex flex-wrap items-center gap-3"><button className={btn+" md:hidden"} onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={18}/></button><h1 className="mr-auto text-xl font-bold md:text-2xl">{page==="Painel"?"Dashboard Principal":page}</h1>{page==="Painel"&&<div className="flex flex-wrap gap-1">{periods.map(p=><button className={btn+(period===p?" border-blue-500 bg-blue-50 text-blue-700":"")} key={p} onClick={()=>setPeriod(p)}>{p}</button>)}</div>}</header>
         {page==="Painel"&&<div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">{period==="Personalizado"&&<><input aria-label="Data inicial" type="date" className={input} value={since} onChange={e=>setSince(e.target.value)}/><input aria-label="Data final" type="date" className={input} value={until} onChange={e=>setUntil(e.target.value)}/></>}<select aria-label="Produto" className={input} value={chosenProduct} onChange={e=>setChosenProduct(e.target.value)}><option value="">Todos os produtos</option>{checkoutProducts.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><select aria-label="Conta" className={input} value={visibleAccounts.some(a=>a.id===selectedAccount)?selectedAccount:""} onChange={e=>setSelectedAccount(e.target.value)} disabled={!visibleAccounts.length}><option value="">{visibleAccounts.length?"Selecione uma conta":"Nenhuma conta ativada"}</option>{visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><button className={btn} onClick={()=>{refresh();void loadSummary();void loadCampaigns();}}><RefreshCw className="inline" size={15}/> Atualizar</button><button className={btn} onClick={()=>setHide(!hide)} aria-label={hide?"Mostrar valores":"Ocultar valores"}>{hide?<Eye size={16}/>:<EyeOff size={16}/>}</button><button className={btn} onClick={()=>document.getElementById("trackup-metrics-customizer")?.scrollIntoView({behavior:"smooth",block:"start"})}><Pencil className="inline" size={15}/> Personalizar métricas</button><button disabled title="Aguardando dados reais" className={btn}><Download className="inline" size={15}/> Exportar</button></div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2"><strong>🔔 Alertas de gasto · Hoje</strong><span>{!alertsOn?"Desativados":alertsLoading?"Consultando...":alertsWarn.length+" aviso(s)"}</span><span className="text-slate-500">Limite {money(alertsCap,currency)} · Alerta {alertsPct}%</span><button className="ml-auto rounded border px-2 py-1 text-blue-700" onClick={()=>setAlertsEdit(!alertsEdit)}>{alertsEdit?"Fechar":"Personalizar"}</button><button className="rounded border px-2 py-1 disabled:opacity-40" disabled={alertsLoading||!alertsOn||!selectedAccount} onClick={()=>void loadAlerts()}>Atualizar</button></div>
+            {alertsEdit&&<div className="mt-2 flex flex-wrap items-end gap-2 border-t pt-2"><label><input type="checkbox" checked={alertsOn} onChange={e=>setAlertsOn(e.target.checked)}/> Ativar</label><label>Tipo <select className={input} value={alertsLevel} onChange={e=>setAlertsLevel(e.target.value as "campaign"|"adset"|"ad")}><option value="ad">Anúncios</option><option value="adset">Conjuntos</option><option value="campaign">Campanhas</option></select></label><label>Limite diário <input className={input+" w-24"} type="number" min="0.01" step="0.5" value={alertsCap} onChange={e=>setAlertsCap(Math.max(0.01,Number(e.target.value)||0.01))}/></label><label>Avisar em % <input className={input+" w-20"} type="number" min="1" max="100" value={alertsPct} onChange={e=>setAlertsPct(Math.min(100,Math.max(1,Number(e.target.value)||1)))}/></label><label>Máximo <select className={input} value={alertsCount} onChange={e=>setAlertsCount(Number(e.target.value))}>{[3,5,10,20].map(n=><option key={n} value={n}>{n}</option>)}</select></label></div>}
+            {alertsOn&&alertsError&&<p role="alert" className="mt-2 text-amber-700">{alertsError}</p>}
+            {alertsOn&&!selectedAccount&&<p className="mt-2 text-slate-500">Selecione uma conta para monitorar.</p>}
+            {alertsOn&&alertsWarn.length>0&&<div className="mt-2 flex flex-wrap gap-2">{alertsWarn.map(x=><span key={x.id} className={"rounded border px-2 py-1 "+(x.spend>=alertsCap?"border-red-200 bg-red-50 text-red-800":"border-amber-200 bg-amber-50 text-amber-800")}><strong>{x.name}</strong> · {money(x.spend,currency)} / {money(alertsCap,currency)} ({Math.round(x.spend/alertsCap*100)}%)</span>)}</div>}
+            <p className="mt-1 text-slate-400">Gasto de hoje por item, na conta selecionada. Apenas alertas visuais; não pausa anúncios. Dados da Meta podem ter atraso.</p>
+          </div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
   <span className="font-semibold text-slate-800">{metaSession?"Meta Ads conectada":"Meta Ads desconectada"}</span>
   {ownerProfile&&<span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-800">Perfil pessoal: {ownerProfile.email}</span>}
