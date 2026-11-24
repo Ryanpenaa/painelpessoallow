@@ -1,3 +1,4 @@
+import { formatCurrencyInBRL } from "../lib/currency";
 import { createFileRoute } from "@tanstack/react-router";
 import TrackupDashboard, { type MetaDashboardSummary } from "../components/TrackupDashboard";
 import CheckoutIntegrations from "../components/CheckoutIntegrations";
@@ -561,7 +562,7 @@ function Home() {
     (!showSelectedOnly||chosenIds.includes(item.id))
   );
   const sum=(key:"spend"|"clicks"|"impressions")=>summary?.[key]??0;
-  const money=(value:number,currency="BRL")=>new Intl.NumberFormat("pt-BR",{style:"currency",currency}).format(value);
+  const money=(value:number,currency="BRL")=>formatCurrencyInBRL(value,currency);
   const currency=adAccounts.find(a=>a.id===selectedAccount)?.currency||"BRL";
   const metricValue=(name:string)=>{
     if(!summary||!visibleAccounts.some(a=>a.id===selectedAccount))return "—";
