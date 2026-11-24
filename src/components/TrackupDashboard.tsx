@@ -1,3 +1,4 @@
+import { formatCurrencyInBRL } from "../lib/currency";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, GripVertical, RotateCcw, Settings2, MoveLeft, MoveRight } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -48,7 +49,7 @@ const initial=["spend","purchase_value","purchases","meta_roas","meta_cpa","cpc"
 const storage="trackup.dashboard.layout.v3";
 const colors=["#2563eb","#06b6d4","#6366f1","#0ea5e9","#8b5cf6","#14b8a6","#f59e0b"];
 const stringList=(values:unknown[])=>values.filter((x):x is string=>typeof x==="string");
-const formatMoney=(v:number,currency:string)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency,maximumFractionDigits:2}).format(v);
+const formatMoney=(v:number,currency:string)=>formatCurrencyInBRL(v,currency);
 const formatCount=(v:number)=>new Intl.NumberFormat("pt-BR",{maximumFractionDigits:0}).format(v);
 function formatMetric(metric:Metric,value:number|null,currency:string){
   if(value===null||!Number.isFinite(value))return "—";
